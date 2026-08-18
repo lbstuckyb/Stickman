@@ -1,0 +1,581 @@
+<title>Lunge Keypoints</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#12161b;
+    --surface:#1a2028;
+    --surface-2:#212933;
+    --border:#2b3440;
+    --border-soft:#232b35;
+    --text:#e8edf1;
+    --text-dim:#8d99a6;
+    --text-faint:#5c6875;
+    --teal:#4fd1c5;
+    --teal-dim:#2f6b66;
+    --amber:#f2b544;
+    --amber-dim:#7a5c26;
+    --warn:#e2574c;
+    --stage-bg:#0d1116;
+    --grid:#1b222a;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .wrap{
+    max-width:1400px;
+    margin:0 auto;
+    padding:2.5rem 2rem 4rem;
+  }
+
+  header{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:1.5rem;
+    margin-bottom:1.75rem;
+    padding-bottom:1.5rem;
+    border-bottom:1px solid var(--border-soft);
+  }
+
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--teal);
+    margin:0 0 0.5rem;
+  }
+
+  h1{
+    font-family:'Sora', sans-serif;
+    font-weight:700;
+    font-size:clamp(1.6rem, 2.4vw, 2.15rem);
+    margin:0;
+    letter-spacing:-0.01em;
+    text-wrap:balance;
+  }
+
+  h1 span{ color:var(--text-dim); font-weight:500; }
+
+  .stat-strip{
+    display:flex;
+    gap:0;
+    flex-wrap:wrap;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    overflow:hidden;
+  }
+
+  .stat{
+    padding:0.65rem 1.1rem;
+    border-right:1px solid var(--border);
+    min-width:6.5rem;
+  }
+  .stat:last-child{ border-right:none; }
+
+  .stat-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.62rem;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:0.2rem;
+  }
+
+  .stat-value{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:1.05rem;
+    font-weight:500;
+    color:var(--text);
+    font-variant-numeric:tabular-nums;
+  }
+  .stat-value.accent{ color:var(--amber); }
+
+  main{
+    display:grid;
+    grid-template-columns:minmax(0, 1.55fr) minmax(320px, 1fr);
+    gap:1.5rem;
+    align-items:start;
+  }
+
+  @media (max-width: 920px){
+    main{ grid-template-columns:1fr; }
+  }
+
+  .panel{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+  }
+
+  .stage-panel{ overflow:hidden; }
+
+  .stage-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:0.9rem 1.15rem;
+    border-bottom:1px solid var(--border-soft);
+  }
+
+  .stage-head h2, .table-head h2{
+    font-family:'Sora', sans-serif;
+    font-size:0.92rem;
+    font-weight:600;
+    margin:0;
+  }
+
+  .legend{
+    display:flex;
+    gap:1rem;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.7rem;
+    color:var(--text-dim);
+  }
+  .legend-item{ display:flex; align-items:center; gap:0.4rem; }
+  .swatch{ width:0.85rem; height:0.15rem; border-radius:1px; }
+  .swatch.dot{ width:0.5rem; height:0.5rem; border-radius:50%; }
+
+  .stage{
+    position:relative;
+    width:100%;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 100% 12.5%,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 12.5% 100%,
+      var(--stage-bg);
+  }
+  .stage svg{ position:absolute; inset:0; width:100%; height:100%; }
+
+  .kp-line{ stroke:var(--teal); stroke-linecap:round; opacity:0.85; transition:opacity 0.15s; }
+  .kp-line.dim{ opacity:0.12; }
+
+  .kp-dot{ fill:var(--amber); stroke:#0b0e11; cursor:pointer; transition:opacity 0.15s; }
+  .kp-dot.dim{ opacity:0.18; }
+  .kp-dot.active{ fill:#fff; }
+
+  .kp-ring{ fill:none; stroke:var(--amber); opacity:0.55; pointer-events:none; transition:opacity 0.15s; }
+  .kp-ring.dim{ opacity:0.08; }
+
+  .kp-label{
+    font-family:'IBM Plex Mono', monospace;
+    fill:var(--text);
+    paint-order:stroke;
+    stroke:#0b0e11;
+    pointer-events:none;
+    opacity:0;
+    transition:opacity 0.12s;
+  }
+  .kp-label.show{ opacity:1; }
+
+  .box-rect{ fill:none; stroke:var(--text-faint); stroke-dasharray:4 3; opacity:0.6; }
+  .box-score{
+    font-family:'IBM Plex Mono', monospace;
+    fill:var(--text-dim);
+  }
+
+  .controls{
+    display:flex;
+    flex-wrap:wrap;
+    gap:1.5rem;
+    align-items:center;
+    padding:0.85rem 1.15rem;
+    border-top:1px solid var(--border-soft);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    color:var(--text-dim);
+  }
+
+  .control{ display:flex; align-items:center; gap:0.6rem; }
+  .control label{ white-space:nowrap; }
+  .control input[type=range]{
+    width:120px;
+    accent-color:var(--amber);
+  }
+  .control .val{ color:var(--amber); min-width:2.6em; font-variant-numeric:tabular-nums; }
+
+  .toggle{
+    display:inline-flex;
+    align-items:center;
+    gap:0.45rem;
+    cursor:pointer;
+    user-select:none;
+  }
+  .toggle input{ accent-color:var(--teal); }
+
+  .table-panel{
+    display:flex;
+    flex-direction:column;
+    max-height:none;
+  }
+
+  .table-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:0.9rem 1.15rem;
+    border-bottom:1px solid var(--border-soft);
+  }
+
+  .table-head .count{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.7rem;
+    color:var(--text-faint);
+  }
+
+  .joint-list{
+    display:flex;
+    flex-direction:column;
+  }
+
+  .joint-row{
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:0.15rem 0.75rem;
+    padding:0.55rem 1.15rem;
+    border-bottom:1px solid var(--border-soft);
+    cursor:pointer;
+    transition:background 0.12s;
+  }
+  .joint-row:last-child{ border-bottom:none; }
+  .joint-row:hover, .joint-row.active{ background:var(--surface-2); }
+
+  .joint-name{
+    font-size:0.82rem;
+    font-weight:500;
+    text-transform:capitalize;
+    color:var(--text);
+  }
+
+  .joint-coords{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    color:var(--text-faint);
+    font-variant-numeric:tabular-nums;
+    text-align:right;
+  }
+
+  .joint-meta{
+    grid-column:1 / -1;
+    display:flex;
+    align-items:center;
+    gap:0.6rem;
+  }
+
+  .conf-track{
+    flex:1;
+    height:4px;
+    background:var(--border);
+    border-radius:2px;
+    overflow:hidden;
+  }
+  .conf-fill{ height:100%; background:var(--teal); border-radius:2px; }
+  .conf-fill.low{ background:var(--warn); }
+
+  .conf-num{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.7rem;
+    color:var(--text-dim);
+    font-variant-numeric:tabular-nums;
+    min-width:2.9em;
+    text-align:right;
+  }
+
+  .badge{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.62rem;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    padding:0.1rem 0.4rem;
+    border-radius:3px;
+    border:1px solid var(--border);
+    color:var(--text-faint);
+  }
+  .badge.occ{ color:var(--warn); border-color:#5a2f2b; }
+
+  footer{
+    margin-top:1.75rem;
+    padding-top:1.25rem;
+    border-top:1px solid var(--border-soft);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    color:var(--text-faint);
+    line-height:1.7;
+  }
+  footer code{
+    background:var(--surface-2);
+    padding:0.05rem 0.35rem;
+    border-radius:3px;
+    color:var(--text-dim);
+  }
+
+  ::selection{ background:var(--teal-dim); color:#fff; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">RF-DETR Keypoint Preview &middot; COCO-17</p>
+      <h1>Skeleton rebuilt from raw output <span>&mdash; lunge.webm, t=3.5s</span></h1>
+    </div>
+    <div class="stat-strip">
+      <div class="stat">
+        <div class="stat-label">People</div>
+        <div class="stat-value" id="stat-people">1</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Detection score</div>
+        <div class="stat-value accent" id="stat-score">0.79</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Inference</div>
+        <div class="stat-value" id="stat-latency">1151 ms</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Resolution</div>
+        <div class="stat-value" id="stat-res">576px</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Device</div>
+        <div class="stat-value" id="stat-device">cpu</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="panel stage-panel">
+      <div class="stage-head">
+        <h2>Skeleton reconstruction</h2>
+        <div class="legend">
+          <div class="legend-item"><span class="swatch" style="background:var(--teal)"></span>skeleton</div>
+          <div class="legend-item"><span class="swatch dot" style="background:var(--amber)"></span>joint</div>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <svg id="overlay" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="controls">
+        <div class="control">
+          <label for="conf-threshold">confidence &ge;</label>
+          <input type="range" id="conf-threshold" min="0" max="1" step="0.01" value="0.3" />
+          <span class="val" id="conf-threshold-val">0.30</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-labels" />
+          joint labels
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-box" checked />
+          person box
+        </label>
+      </div>
+    </div>
+
+    <div class="panel table-panel">
+      <div class="table-head">
+        <h2>Joints</h2>
+        <span class="count" id="joint-count">17 of 17</span>
+      </div>
+      <div class="joint-list" id="joint-list"></div>
+    </div>
+  </main>
+
+  <footer>
+    drawn from <code>{ people: [{ score, box, keypoints: [{ x, y, v, occluded }] }] }</code> only &mdash; no video
+    frame, just the 17 (x, y) pairs and the fixed COCO-17 skeleton edge list, denormalized to source pixels
+    (1920&times;1080) and reprojected onto the grid below. <code>v</code> is per-joint &ldquo;findable&rdquo;
+    confidence, not IoU. hover or tap a joint to isolate it.
+  </footer>
+</div>
+
+<script>
+const DATA = {"image": {"w": 1920, "h": 1080}, "keypoints": [{"name": "nose", "label": "nose", "x": 1192.3, "y": 225.6, "nx": 0.6210013071695963, "ny": 0.20888683177806713, "conf": 0.9914, "occluded": false}, {"name": "left_eye", "label": "left eye", "x": 1208.9, "y": 211.8, "nx": 0.6296200434366862, "ny": 0.19607426678692852, "conf": 0.9967, "occluded": false}, {"name": "right_eye", "label": "right eye", "x": 1194.7, "y": 213.1, "nx": 0.6222305297851562, "ny": 0.19730521308051216, "conf": 0.2224, "occluded": false}, {"name": "left_ear", "label": "left ear", "x": 1255.5, "y": 222.6, "nx": 0.6538823445638021, "ny": 0.20613351044831452, "conf": 0.9979, "occluded": false}, {"name": "right_ear", "label": "right ear", "x": 1238.8, "y": 226.7, "nx": 0.6451988220214844, "ny": 0.20990774366590711, "conf": 0.0072, "occluded": false}, {"name": "left_shoulder", "label": "left shoulder", "x": 1309.4, "y": 308.8, "nx": 0.6819734573364258, "ny": 0.2859456662778501, "conf": 0.9994, "occluded": false}, {"name": "right_shoulder", "label": "right shoulder", "x": 1184.1, "y": 328.4, "nx": 0.6167259216308594, "ny": 0.30403948183412904, "conf": 0.9993, "occluded": false}, {"name": "left_elbow", "label": "left elbow", "x": 1355.9, "y": 417.8, "nx": 0.7061975479125977, "ny": 0.386851473207827, "conf": 0.9992, "occluded": false}, {"name": "right_elbow", "label": "right elbow", "x": 1144.7, "y": 430.9, "nx": 0.5961755752563477, "ny": 0.3990040814435041, "conf": 0.9994, "occluded": false}, {"name": "left_wrist", "label": "left wrist", "x": 1284.3, "y": 445.5, "nx": 0.6688933690388997, "ny": 0.41246637415002896, "conf": 0.9994, "occluded": false}, {"name": "right_wrist", "label": "right wrist", "x": 1070.6, "y": 386.4, "nx": 0.5576287587483724, "ny": 0.35779828672055847, "conf": 0.9991, "occluded": false}, {"name": "left_hip", "label": "left hip", "x": 1296.6, "y": 522.6, "nx": 0.6752968470255534, "ny": 0.48390514232494214, "conf": 0.9998, "occluded": false}, {"name": "right_hip", "label": "right hip", "x": 1212.5, "y": 518.2, "nx": 0.6315093358357747, "ny": 0.479831384729456, "conf": 0.9998, "occluded": false}, {"name": "left_knee", "label": "left knee", "x": 1329.9, "y": 675.9, "nx": 0.692676035563151, "ny": 0.6258038556134259, "conf": 0.9995, "occluded": false}, {"name": "right_knee", "label": "right knee", "x": 1120.8, "y": 615.8, "nx": 0.5837568918863932, "ny": 0.5701465182834201, "conf": 0.9993, "occluded": false}, {"name": "left_ankle", "label": "left ankle", "x": 1336.3, "y": 736.1, "nx": 0.6959828058878581, "ny": 0.6815998218677662, "conf": 0.9986, "occluded": false}, {"name": "right_ankle", "label": "right ankle", "x": 1148.2, "y": 747.8, "nx": 0.5979976018269857, "ny": 0.6923645584671586, "conf": 0.9988, "occluded": false}], "skeleton": [[5, 6], [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [0, 1], [0, 2], [1, 3], [2, 4], [0, 5], [0, 6]], "box": [0.531566874186198, 0.14678769994665075, 0.7175788879394531, 0.7379532425491898], "score": 0.7933408617973328, "meta": 1151.3, "resolution": 576, "device": "cpu"};
+
+const svg = document.getElementById('overlay');
+const jointList = document.getElementById('joint-list');
+const thresholdInput = document.getElementById('conf-threshold');
+const thresholdVal = document.getElementById('conf-threshold-val');
+const toggleLabels = document.getElementById('toggle-labels');
+const toggleBox = document.getElementById('toggle-box');
+const jointCount = document.getElementById('joint-count');
+
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs){
+  const e = document.createElementNS(NS, tag);
+  for(const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+document.getElementById('stat-score').textContent = DATA.score.toFixed(2);
+document.getElementById('stat-latency').textContent = Math.round(DATA.meta) + ' ms';
+document.getElementById('stat-res').textContent = DATA.resolution + 'px';
+document.getElementById('stat-device').textContent = DATA.device;
+
+// frame the view around the reconstructed points, not the full source frame —
+// there's no photo underneath to justify keeping 1920x1080 of empty grid.
+const xs = DATA.keypoints.map(k => k.x), ys = DATA.keypoints.map(k => k.y);
+const minX = Math.min(...xs), maxX = Math.max(...xs);
+const minY = Math.min(...ys), maxY = Math.max(...ys);
+const padX = (maxX - minX) * 0.22, padY = (maxY - minY) * 0.12;
+const vbX = minX - padX, vbY = minY - padY;
+const vbW = (maxX - minX) + padX * 2, vbH = (maxY - minY) + padY * 2;
+svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+document.getElementById('stage').style.aspectRatio = `${vbW} / ${vbH}`;
+
+// every stroke/dot/font size below is derived from the plotted extent, not a
+// fixed pixel constant — so the diagram reads the same regardless of how
+// tightly the raw points happen to cluster.
+const unit = Math.max(vbW, vbH) / 90;
+const dotR = unit * 0.9, ringR = unit * 2.3, lineW = unit * 0.42;
+const labelSize = unit * 1.4, boxStroke = unit * 0.17, scoreSize = unit * 1.5;
+
+// person bounding box, straight from data["xyxy"] in the payload
+const [bx1, by1, bx2, by2] = DATA.box;
+const boxRect = el('rect', {
+  class: 'box-rect',
+  x: bx1 * DATA.image.w, y: by1 * DATA.image.h,
+  width: (bx2 - bx1) * DATA.image.w, height: (by2 - by1) * DATA.image.h,
+  'stroke-width': boxStroke,
+});
+svg.appendChild(boxRect);
+const boxScore = el('text', {
+  class: 'box-score',
+  x: bx1 * DATA.image.w, y: by1 * DATA.image.h - unit * 0.5,
+  'font-size': scoreSize,
+});
+boxScore.textContent = DATA.score.toFixed(2);
+svg.appendChild(boxScore);
+
+// skeleton lines — literally SKELETON index pairs from rfdetr_pose.py, nothing inferred
+const lineEls = DATA.skeleton.map(([a, b]) => {
+  const ka = DATA.keypoints[a], kb = DATA.keypoints[b];
+  const line = el('line', {
+    class: 'kp-line', x1: ka.x, y1: ka.y, x2: kb.x, y2: kb.y,
+    'stroke-width': lineW,
+  });
+  svg.appendChild(line);
+  return { line, a, b };
+});
+
+// joints: ring (1sigma-ish visual weight, not the real covariance) + dot + label
+const jointEls = DATA.keypoints.map((k, i) => {
+  const ring = el('circle', { class: 'kp-ring', cx: k.x, cy: k.y, r: ringR, 'stroke-width': lineW * 0.85 });
+  const dot = el('circle', { class: 'kp-dot', cx: k.x, cy: k.y, r: dotR, 'stroke-width': boxStroke * 3 });
+  const label = el('text', {
+    class: 'kp-label', x: k.x + dotR * 1.8, y: k.y - dotR * 1.6,
+    'font-size': labelSize, 'stroke-width': labelSize * 0.24,
+  });
+  label.textContent = k.label;
+  svg.appendChild(ring);
+  svg.appendChild(dot);
+  svg.appendChild(label);
+  return { ring, dot, label, k, i };
+});
+
+// joint table rows
+const rows = DATA.keypoints.map((k, i) => {
+  const row = document.createElement('div');
+  row.className = 'joint-row';
+  row.dataset.index = i;
+
+  const name = document.createElement('div');
+  name.className = 'joint-name';
+  name.textContent = k.label;
+
+  const coords = document.createElement('div');
+  coords.className = 'joint-coords';
+  coords.textContent = `${k.x.toFixed(0)}, ${k.y.toFixed(0)}px`;
+
+  const meta = document.createElement('div');
+  meta.className = 'joint-meta';
+
+  const track = document.createElement('div');
+  track.className = 'conf-track';
+  const fill = document.createElement('div');
+  fill.className = 'conf-fill' + (k.conf < 0.3 ? ' low' : '');
+  fill.style.width = (k.conf * 100).toFixed(0) + '%';
+  track.appendChild(fill);
+
+  const num = document.createElement('div');
+  num.className = 'conf-num';
+  num.textContent = k.conf.toFixed(2);
+
+  const badge = document.createElement('div');
+  badge.className = 'badge' + (k.occluded ? ' occ' : '');
+  badge.textContent = k.occluded ? 'occluded' : 'visible';
+
+  meta.appendChild(track);
+  meta.appendChild(num);
+  meta.appendChild(badge);
+
+  row.appendChild(name);
+  row.appendChild(coords);
+  row.appendChild(meta);
+
+  row.addEventListener('mouseenter', () => setActive(i));
+  row.addEventListener('mouseleave', () => setActive(null));
+
+  jointList.appendChild(row);
+  return row;
+});
+
+jointEls.forEach(({ dot }, i) => {
+  dot.addEventListener('mouseenter', () => setActive(i));
+  dot.addEventListener('mouseleave', () => setActive(null));
+});
+
+function setActive(i){
+  jointEls.forEach((j, idx) => j.dot.classList.toggle('active', idx === i));
+  rows.forEach((r, idx) => r.classList.toggle('active', idx === i));
+  if(i !== null){
+    rows[i].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function applyThreshold(){
+  const t = parseFloat(thresholdInput.value);
+  thresholdVal.textContent = t.toFixed(2);
+
+  let visibleCount = 0;
+  jointEls.forEach(({ ring, dot, label, k }) => {
+    const pass = k.conf >= t;
+    if(pass) visibleCount++;
+    ring.classList.toggle('dim', !pass);
+    dot.classList.toggle('dim', !pass);
+    if(!toggleLabels.checked || !pass){
+      label.classList.remove('show');
+    } else {
+      label.classList.add('show');
+    }
+  });
+
+  lineEls.forEach(({ line, a, b }) => {
+    const pass = DATA.keypoints[a].conf >= t && DATA.keypoints[b].conf >= t;
+    line.classList.toggle('dim', !pass);
+  });
+
+  rows.forEach((row, i) => {
+    const pass = DATA.keypoints[i].conf >= t;
+    row.style.opacity = pass ? '1' : '0.35';
+  });
+
+  jointCount.textContent = `${visibleCount} of ${DATA.keypoints.length}`;
+}
+
+thresholdInput.addEventListener('input', applyThreshold);
+toggleLabels.addEventListener('change', applyThreshold);
+toggleBox.addEventListener('change', () => {
+  boxRect.style.display = toggleBox.checked ? '' : 'none';
+  boxScore.style.display = toggleBox.checked ? '' : 'none';
+});
+
+applyThreshold();
+</script>

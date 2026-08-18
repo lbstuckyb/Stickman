@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retarget — pose landmarks to a stick rig</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#101822;
+    --panel:#17212e;
+    --panel-2:#1d2938;
+    --rule:#26364a;
+    --text:#cfdae6;
+    --muted:#6c8299;
+    --measured:#4fd1c5;   /* teal = read from the camera */
+    --derived:#f2b544;    /* amber = synthesized by the rig */
+    --warn:#e8705e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--ink);
+    color:var(--text);
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:13px;
+    line-height:1.5;
+    display:flex;
+    flex-direction:column;
+  }
+  header{
+    display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+    padding:14px 20px;border-bottom:1px solid var(--rule);
+  }
+  h1{
+    font-family:"Bricolage Grotesque",sans-serif;
+    font-weight:800;font-size:19px;letter-spacing:-.02em;margin:0;
+  }
+  .tag{color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  #status{margin-left:auto;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  #status[data-state="live"]{color:var(--measured)}
+  #status[data-state="error"]{color:var(--warn)}
+
+  main{flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:0}
+  .pane{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .pane + .pane{border-left:1px solid var(--rule)}
+  .pane-label{
+    position:absolute;top:10px;left:12px;z-index:2;
+    font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+    pointer-events:none;
+  }
+  .pane-label b{color:var(--measured);font-weight:500}
+  .pane.target .pane-label b{color:var(--derived)}
+  .stage{flex:1;position:relative;min-height:0;background:var(--panel)}
+  .pane.target .stage{background:var(--panel-2)}
+  canvas,video{position:absolute;inset:0;width:100%;height:100%}
+  video{object-fit:contain;background:#0b1119}
+  video.mirror{transform:scaleX(-1)}
+  #srcCanvas{pointer-events:none}
+
+  /* telemetry — the numbers actually driving the puppet */
+  #telemetry{
+    border-top:1px solid var(--rule);padding:10px 12px;
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:2px 18px;
+  }
+  .chan{display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;font-size:11px}
+  .chan span:first-child{color:var(--muted);letter-spacing:.04em}
+  .bar{height:3px;background:var(--rule);position:relative;overflow:hidden}
+  .bar i{position:absolute;top:0;bottom:0;left:50%;background:var(--derived);transform-origin:left}
+  .val{text-align:right;color:var(--derived);font-variant-numeric:tabular-nums}
+
+  footer{
+    border-top:1px solid var(--rule);padding:12px 20px;
+    display:flex;gap:22px;align-items:center;flex-wrap:wrap;
+  }
+  .ctl{display:flex;align-items:center;gap:8px}
+  label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  button, select{
+    font:inherit;font-size:12px;color:var(--text);
+    background:var(--panel-2);border:1px solid var(--rule);border-radius:2px;
+    padding:6px 12px;cursor:pointer;
+  }
+  button:hover,select:hover{border-color:var(--measured)}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--measured);outline-offset:2px}
+  button[aria-pressed="true"]{border-color:var(--derived);color:var(--derived)}
+  input[type=range]{width:110px;accent-color:var(--measured)}
+  .hint{color:var(--muted);font-size:11px;max-width:34ch}
+  @media (max-width:820px){
+    main{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+    .pane + .pane{border-left:none;border-top:1px solid var(--rule)}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Retarget</h1>
+  <span class="tag">pose landmarks &rarr; stick rig</span>
+  <span id="status" data-state="idle">Demo loop</span>
+</header>
+
+<main>
+  <section class="pane source">
+    <div class="pane-label">Source &mdash; <b>measured landmarks</b></div>
+    <div class="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="srcCanvas"></canvas>
+    </div>
+  </section>
+
+  <section class="pane target">
+    <div class="pane-label">Target &mdash; <b>driven rig</b></div>
+    <div class="stage"><canvas id="rigCanvas"></canvas></div>
+    <div id="telemetry"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="ctl">
+    <label for="source">Input</label>
+    <select id="source">
+      <option value="demo">Demo loop</option>
+      <option value="camera">Camera</option>
+      <option value="file">Video file&hellip;</option>
+    </select>
+    <input type="file" id="fileInput" accept="video/*" hidden>
+  </div>
+  <div class="ctl">
+    <label for="smooth">Smoothing</label>
+    <input type="range" id="smooth" min="0" max="100" value="55">
+  </div>
+  <div class="ctl">
+    <button id="mirror" aria-pressed="true">Mirror</button>
+    <button id="ghost" aria-pressed="false">Show source skeleton</button>
+  </div>
+  <p class="hint">Bone lengths are fixed. Only angles come from the camera, so the figure keeps its own proportions.</p>
+</footer>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+/* ---------------------------------------------------------------
+   1. Landmark indices we care about (MediaPipe Pose, 33 points)
+   --------------------------------------------------------------- */
+const L = { nose:0, earL:7, earR:8, shL:11, shR:12, elL:13, elR:14,
+            wrL:15, wrR:16, hipL:23, hipR:24, knL:25, knR:26,
+            anL:27, anR:28, toeL:31, toeR:32 };
+
+/* ---------------------------------------------------------------
+   2. One Euro filter — smooths when still, stays responsive when fast.
+      Angles are filtered as (cos, sin) so ±180° never wraps badly.
+   --------------------------------------------------------------- */
+class LowPass{
+  constructor(){ this.y=null; }
+  apply(x,a){ this.y = this.y===null ? x : a*x+(1-a)*this.y; return this.y; }
+}
+class OneEuro{
+  constructor(minCutoff=1.2,beta=.35,dCutoff=1.0){
+    this.minCutoff=minCutoff; this.beta=beta; this.dCutoff=dCutoff;
+    this.x=new LowPass(); this.dx=new LowPass(); this.prev=null;
+  }
+  static alpha(cutoff,dt){ const tau=1/(2*Math.PI*cutoff); return 1/(1+tau/dt); }
+  filter(v,dt){
+    const dv = this.prev===null ? 0 : (v-this.prev)/dt;
+    this.prev=v;
+    const edv = this.dx.apply(dv, OneEuro.alpha(this.dCutoff,dt));
+    const cutoff = this.minCutoff + this.beta*Math.abs(edv);
+    return this.x.apply(v, OneEuro.alpha(cutoff,dt));
+  }
+}
+class AngleFilter{
+  constructor(){ this.c=new OneEuro(); this.s=new OneEuro(); this.last=0; }
+  filter(a,dt){
+    const c=this.c.filter(Math.cos(a),dt), s=this.s.filter(Math.sin(a),dt);
+    this.last = Math.atan2(s,c);
+    return this.last;
+  }
+}
+
+/* ---------------------------------------------------------------
+   3. The rig. Lengths in pixels — these never change, whatever the
+      person's proportions or distance from the lens.
+   --------------------------------------------------------------- */
+const RIG = {
+  pelvisHalf:24, spine:86, shoulderHalf:32, neck:16, headR:24,
+  upperArm:56, forearm:52, thigh:72, shin:68, foot:20
+};
+const CHANNELS = [
+  ["spine","Spine"],["head","Head"],
+  ["armLU","L upper arm"],["armLF","L forearm"],
+  ["armRU","R upper arm"],["armRF","R forearm"],
+  ["legLU","L thigh"],["legLS","L shin"],
+  ["legRU","R thigh"],["legRS","R shin"]
+];
+
+const filters = {}; CHANNELS.forEach(([k])=>filters[k]=new AngleFilter());
+const rootX = new OneEuro(1.0,.2), rootY = new OneEuro(1.0,.2);
+let pose = null;                 // last filtered pose
+const MIN_VIS = 0.4;
+
+const ang = (a,b)=>Math.atan2(b.y-a.y, b.x-a.x);
+const mid = (a,b)=>({x:(a.x+b.x)/2, y:(a.y+b.y)/2, visibility:Math.min(a.visibility??1,b.visibility??1)});
+const ok  = p => p && (p.visibility===undefined || p.visibility>=MIN_VIS);
+
+/* Read a landmark set and reduce it to the angles the rig needs. */
+function readAngles(lm){
+  const g = i => lm[i];
+  const hips = mid(g(L.hipL), g(L.hipR));
+  const shs  = mid(g(L.shL),  g(L.shR));
+  const ears = mid(g(L.earL), g(L.earR));
+  const raw = {
+    spine: ang(hips, shs),
+    head:  ang(shs, ears),
+    armLU: ang(g(L.shL), g(L.elL)), armLF: ang(g(L.elL), g(L.wrL)),
+    armRU: ang(g(L.shR), g(L.elR)), armRF: ang(g(L.elR), g(L.wrR)),
+    legLU: ang(g(L.hipL), g(L.knL)), legLS: ang(g(L.knL), g(L.anL)),
+    legRU: ang(g(L.hipR), g(L.knR)), legRS: ang(g(L.knR), g(L.anR))
+  };
+  const conf = {
+    spine: ok(hips)&&ok(shs), head: ok(shs)&&ok(ears),
+    armLU: ok(g(L.shL))&&ok(g(L.elL)), armLF: ok(g(L.elL))&&ok(g(L.wrL)),
+    armRU: ok(g(L.shR))&&ok(g(L.elR)), armRF: ok(g(L.elR))&&ok(g(L.wrR)),
+    legLU: ok(g(L.hipL))&&ok(g(L.knL)), legLS: ok(g(L.knL))&&ok(g(L.anL)),
+    legRU: ok(g(L.hipR))&&ok(g(L.knR)), legRS: ok(g(L.knR))&&ok(g(L.anR))
+  };
+  return { raw, conf, root:hips };
+}
+
+/* Filter, dropping any channel the model isn't confident about
+   (the joint simply holds its previous angle instead of snapping). */
+function retarget(lm, dt){
+  const {raw, conf, root} = readAngles(lm);
+  const out = {};
+  for(const [k] of CHANNELS){
+    out[k] = conf[k] ? filters[k].filter(raw[k],dt) : filters[k].last;
+  }
+  out.root = { x: rootX.filter(root.x,dt), y: rootY.filter(root.y,dt) };
+  return out;
+}
+
+/* Forward kinematics: walk down each chain placing fixed-length bones. */
+function solve(p, ox, oy, s){
+  const step=(pt,a,len)=>({x:pt.x+Math.cos(a)*len*s, y:pt.y+Math.sin(a)*len*s});
+  const hipC={x:ox,y:oy};
+  const perp=p.spine+Math.PI/2;
+  const off=(pt,a,d)=>({x:pt.x+Math.cos(a)*d*s, y:pt.y+Math.sin(a)*d*s});
+
+  const hipL=off(hipC,perp,RIG.pelvisHalf), hipR=off(hipC,perp,-RIG.pelvisHalf);
+  const shC=step(hipC,p.spine,RIG.spine);
+  const shL=off(shC,perp,RIG.shoulderHalf), shR=off(shC,perp,-RIG.shoulderHalf);
+  const headC=step(shC,p.head,RIG.neck+RIG.headR);
+
+  const elL=step(shL,p.armLU,RIG.upperArm), wrL=step(elL,p.armLF,RIG.forearm);
+  const elR=step(shR,p.armRU,RIG.upperArm), wrR=step(elR,p.armRF,RIG.forearm);
+  const knL=step(hipL,p.legLU,RIG.thigh),  anL=step(knL,p.legLS,RIG.shin);
+  const knR=step(hipR,p.legRU,RIG.thigh),  anR=step(knR,p.legRS,RIG.shin);
+
+  return {hipC,hipL,hipR,shC,shL,shR,headC,elL,wrL,elR,wrR,knL,anL,knR,anR};
+}
+
+/* ---------------------------------------------------------------
+   4. Drawing
+   --------------------------------------------------------------- */
+const rigCv=document.getElementById("rigCanvas"), rigCtx=rigCv.getContext("2d");
+const srcCv=document.getElementById("srcCanvas"), srcCtx=srcCv.getContext("2d");
+function fit(cv){
+  const r=cv.getBoundingClientRect(), d=Math.min(devicePixelRatio||1,2);
+  cv.width=Math.max(1,r.width*d); cv.height=Math.max(1,r.height*d);
+  return {w:r.width,h:r.height,d};
+}
+
+function drawRig(p){
+  const {w,h,d}=fit(rigCv);
+  rigCtx.setTransform(d,0,0,d,0,0);
+  rigCtx.clearRect(0,0,w,h);
+
+  // ground grid — a reference so translation is readable
+  rigCtx.strokeStyle="#26364a"; rigCtx.lineWidth=1;
+  rigCtx.beginPath();
+  for(let x=0;x<w;x+=40){rigCtx.moveTo(x+.5,0);rigCtx.lineTo(x+.5,h);}
+  for(let y=0;y<h;y+=40){rigCtx.moveTo(0,y+.5);rigCtx.lineTo(w,y+.5);}
+  rigCtx.stroke();
+  if(!p) return;
+
+  const s=Math.min(w/420,h/440,1.25);
+  const j=solve(p, p.root.x*w, p.root.y*h*.92+h*.02, s);
+
+  const line=(a,b,width)=>{rigCtx.lineWidth=width*s;rigCtx.beginPath();rigCtx.moveTo(a.x,a.y);rigCtx.lineTo(b.x,b.y);rigCtx.stroke();};
+  rigCtx.lineCap="round"; rigCtx.strokeStyle=getComputedStyle(document.body).getPropertyValue("--derived").trim();
+
+  line(j.hipL,j.hipR,5); line(j.hipC,j.shC,7); line(j.shL,j.shR,5);
+  line(j.shL,j.elL,5); line(j.elL,j.wrL,4);
+  line(j.shR,j.elR,5); line(j.elR,j.wrR,4);
+  line(j.hipL,j.knL,6); line(j.knL,j.anL,5);
+  line(j.hipR,j.knR,6); line(j.knR,j.anR,5);
+
+  rigCtx.lineWidth=5*s;
+  rigCtx.beginPath(); rigCtx.arc(j.headC.x,j.headC.y,RIG.headR*s,0,7); rigCtx.stroke();
+  line(j.shC,{x:j.headC.x,y:j.headC.y},4);
+
+  // pivots — makes it obvious these are joints, not a polyline
+  rigCtx.fillStyle="#1d2938";
+  for(const k of ["elL","elR","wrL","wrR","knL","knR","anL","anR","shC","hipC"]){
+    rigCtx.beginPath(); rigCtx.arc(j[k].x,j[k].y,3.2*s,0,7); rigCtx.fill(); rigCtx.lineWidth=2*s; rigCtx.stroke();
+  }
+}
+
+const EDGES=[[L.shL,L.shR],[L.shL,L.elL],[L.elL,L.wrL],[L.shR,L.elR],[L.elR,L.wrR],
+             [L.shL,L.hipL],[L.shR,L.hipR],[L.hipL,L.hipR],
+             [L.hipL,L.knL],[L.knL,L.anL],[L.hipR,L.knR],[L.knR,L.anR]];
+function drawSource(lm){
+  const {w,h,d}=fit(srcCv);
+  srcCtx.setTransform(d,0,0,d,0,0);
+  srcCtx.clearRect(0,0,w,h);
+  if(!lm || !showGhost) return;
+  const teal=getComputedStyle(document.body).getPropertyValue("--measured").trim();
+  srcCtx.strokeStyle=teal; srcCtx.fillStyle=teal; srcCtx.lineWidth=1.5;
+  srcCtx.beginPath();
+  for(const [a,b] of EDGES){
+    if(!ok(lm[a])||!ok(lm[b])) continue;
+    srcCtx.moveTo(lm[a].x*w,lm[a].y*h); srcCtx.lineTo(lm[b].x*w,lm[b].y*h);
+  }
+  srcCtx.stroke();
+  for(const p of lm){
+    if(!ok(p)) continue;
+    srcCtx.globalAlpha=.85;
+    srcCtx.beginPath(); srcCtx.arc(p.x*w,p.y*h,2.6,0,7); srcCtx.fill();
+  }
+  srcCtx.globalAlpha=1;
+}
+
+/* telemetry strip */
+const tel=document.getElementById("telemetry"), rows={};
+for(const [k,label] of CHANNELS){
+  const el=document.createElement("div"); el.className="chan";
+  el.innerHTML=`<span>${label}</span><span class="bar"><i></i></span><span class="val">0&deg;</span>`;
+  tel.appendChild(el);
+  rows[k]={bar:el.querySelector("i"), val:el.querySelector(".val")};
+}
+function drawTelemetry(p){
+  if(!p) return;
+  for(const [k] of CHANNELS){
+    let deg = p[k]*180/Math.PI;
+    while(deg>180)deg-=360; while(deg<-180)deg+=360;
+    rows[k].val.textContent = deg.toFixed(0)+"\u00B0";
+    const f=deg/180;
+    rows[k].bar.style.transform=`translateX(${f<0?f*100:0}%) scaleX(${Math.abs(f)})`;
+    rows[k].bar.style.width="100%";
+  }
+}
+
+/* ---------------------------------------------------------------
+   5. Demo generator — synthesises a walk cycle as landmark data,
+      so the exact same retarget path runs with no camera.
+   --------------------------------------------------------------- */
+const NOM={spine:.20,shHalf:.072,hipHalf:.052,upper:.125,fore:.115,thigh:.155,shin:.145,neck:.055};
+function demoLandmarks(t){
+  const w=t*2.6, sw=Math.sin(w), sw2=Math.sin(2*w);
+  const hipC={x:.5+.035*Math.sin(w*.5), y:.60-.012*sw2};
+  const P=(p,a,l)=>({x:p.x+Math.cos(a)*l, y:p.y+Math.sin(a)*l});
+  const up=-Math.PI/2, dn=Math.PI/2;
+  const lean=up+0.05*sw;
+  const shC=P(hipC,lean,NOM.spine);
+  const hipL={x:hipC.x-NOM.hipHalf,y:hipC.y}, hipR={x:hipC.x+NOM.hipHalf,y:hipC.y};
+  const shL={x:shC.x-NOM.shHalf,y:shC.y},   shR={x:shC.x+NOM.shHalf,y:shC.y};
+  const thL=dn+.45*sw, thR=dn-.45*sw;
+  const knL=P(hipL,thL,NOM.thigh), knR=P(hipR,thR,NOM.thigh);
+  const anL=P(knL,dn+.45*sw-Math.max(0,.6*Math.sin(w+2)),NOM.shin);
+  const anR=P(knR,dn-.45*sw-Math.max(0,.6*Math.sin(w+2+Math.PI)),NOM.shin);
+  const auL=dn-.40*sw, auR=dn+.40*sw;
+  const elL=P(shL,auL,NOM.upper), elR=P(shR,auR,NOM.upper);
+  const wrL=P(elL,auL-.35,NOM.fore), wrR=P(elR,auR-.35,NOM.fore);
+  const head=P(shC,up-.03*sw,NOM.neck);
+  const lm=Array.from({length:33},()=>({x:.5,y:.5,visibility:0}));
+  const set=(i,p)=>lm[i]={x:p.x,y:p.y,visibility:1};
+  set(L.nose,{x:head.x,y:head.y}); set(L.earL,head); set(L.earR,head);
+  set(L.shL,shL); set(L.shR,shR); set(L.elL,elL); set(L.elR,elR);
+  set(L.wrL,wrL); set(L.wrR,wrR); set(L.hipL,hipL); set(L.hipR,hipR);
+  set(L.knL,knL); set(L.knR,knR); set(L.anL,anL); set(L.anR,anR);
+  return lm;
+}
+
+/* ---------------------------------------------------------------
+   6. Wiring
+   --------------------------------------------------------------- */
+const video=document.getElementById("video");
+const statusEl=document.getElementById("status");
+const sourceSel=document.getElementById("source");
+const fileInput=document.getElementById("fileInput");
+const mirrorBtn=document.getElementById("mirror");
+const ghostBtn=document.getElementById("ghost");
+const smoothRange=document.getElementById("smooth");
+
+let mode="demo", mirror=true, showGhost=false, landmarker=null, stream=null;
+let lastT=performance.now(), lastVideoTime=-1;
+
+function setStatus(text,state="idle"){ statusEl.textContent=text; statusEl.dataset.state=state; }
+function applySmoothing(){
+  const v=+smoothRange.value/100;
+  const minCutoff=3.0-2.7*v, beta=.5-.42*v;
+  for(const k in filters){ for(const f of [filters[k].c,filters[k].s]){ f.minCutoff=minCutoff; f.beta=beta; } }
+  rootX.minCutoff=rootY.minCutoff=minCutoff;
+}
+smoothRange.addEventListener("input",applySmoothing); applySmoothing();
+
+mirrorBtn.addEventListener("click",()=>{
+  mirror=!mirror; mirrorBtn.setAttribute("aria-pressed",String(mirror));
+  video.classList.toggle("mirror",mirror);
+});
+ghostBtn.addEventListener("click",()=>{
+  showGhost=!showGhost; ghostBtn.setAttribute("aria-pressed",String(showGhost));
+});
+video.classList.toggle("mirror",mirror);
+
+async function ensureLandmarker(){
+  if(landmarker) return landmarker;
+  setStatus("Loading model\u2026");
+  const files=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  landmarker=await PoseLandmarker.createFromOptions(files,{
+    baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",delegate:"GPU"},
+    runningMode:"VIDEO", numPoses:1
+  });
+  return landmarker;
+}
+function stopStream(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }
+
+sourceSel.addEventListener("change",async()=>{
+  const v=sourceSel.value;
+  if(v==="file"){ fileInput.click(); return; }
+  stopStream(); video.removeAttribute("src"); video.srcObject=null;
+  if(v==="demo"){ mode="demo"; setStatus("Demo loop"); return; }
+  try{
+    await ensureLandmarker();
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+    video.srcObject=stream; await video.play();
+    mode="video"; lastVideoTime=-1; setStatus("Camera live","live");
+  }catch(e){
+    mode="demo"; sourceSel.value="demo";
+    setStatus("Camera unavailable \u2014 open this file directly in a browser","error");
+  }
+});
+
+fileInput.addEventListener("change",async()=>{
+  const f=fileInput.files?.[0]; if(!f){ sourceSel.value=mode==="demo"?"demo":"camera"; return; }
+  try{
+    await ensureLandmarker();
+    stopStream(); video.srcObject=null;
+    video.src=URL.createObjectURL(f); video.loop=true; await video.play();
+    mode="video"; lastVideoTime=-1; sourceSel.value="file"; setStatus(f.name,"live");
+  }catch(e){ setStatus("Could not load model","error"); sourceSel.value="demo"; mode="demo"; }
+});
+
+function loop(){
+  const now=performance.now();
+  const dt=Math.min(Math.max((now-lastT)/1000,1/240),1/10);
+  lastT=now;
+
+  let lm=null;
+  if(mode==="demo"){
+    lm=demoLandmarks(now/1000);
+  }else if(landmarker && video.readyState>=2 && video.currentTime!==lastVideoTime){
+    lastVideoTime=video.currentTime;
+    const res=landmarker.detectForVideo(video,now);
+    if(res.landmarks?.length) lm=res.landmarks[0];
+    if(lm && mirror) lm=lm.map(p=>({...p,x:1-p.x}));
+  }
+
+  if(lm){ pose=retarget(lm,dt); }
+  drawSource(lm);
+  drawRig(pose);
+  drawTelemetry(pose);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.addEventListener("resize",()=>{ drawRig(pose); });
+</script>
+</body>
+</html>
