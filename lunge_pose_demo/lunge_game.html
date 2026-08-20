@@ -1,0 +1,646 @@
+<title>Lunge Arena</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#12161b; --surface:#1a2028; --surface-2:#212933; --border:#2b3440; --border-soft:#232b35;
+    --text:#e8edf1; --text-dim:#8d99a6; --text-faint:#5c6875;
+    --teal:#4fd1c5; --teal-dim:#2f6b66; --amber:#f2b544; --amber-dim:#7a5c26; --warn:#e2574c;
+    --stage-bg:#0d1116; --grid:#1b222a;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:1400px; margin:0 auto; padding:2.5rem 2rem 4rem; }
+  header{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:1.5rem; margin-bottom:1.75rem; padding-bottom:1.5rem; border-bottom:1px solid var(--border-soft); }
+  .eyebrow{ font-family:'IBM Plex Mono', monospace; font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--teal); margin:0 0 0.5rem; }
+  h1{ font-family:'Sora', sans-serif; font-weight:700; font-size:clamp(1.6rem, 2.4vw, 2.15rem); margin:0; letter-spacing:-0.01em; text-wrap:balance; }
+  h1 span{ color:var(--text-dim); font-weight:500; }
+  .stat-strip{ display:flex; gap:0; flex-wrap:wrap; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .stat{ padding:0.65rem 1.1rem; border-right:1px solid var(--border); min-width:5.5rem; }
+  .stat:last-child{ border-right:none; }
+  .stat-label{ font-family:'IBM Plex Mono', monospace; font-size:0.62rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-faint); margin-bottom:0.2rem; }
+  .stat-value{ font-family:'IBM Plex Mono', monospace; font-size:1.05rem; font-weight:500; color:var(--text); font-variant-numeric:tabular-nums; }
+  .stat-value.accent{ color:var(--amber); }
+  .stat-value.teal{ color:var(--teal); }
+  .stat-value.low{ color:var(--warn); }
+  main{ display:grid; grid-template-columns:minmax(0, 1.55fr) minmax(320px, 1fr); gap:1.5rem; align-items:start; }
+  @media (max-width: 920px){ main{ grid-template-columns:1fr; } }
+  .panel{ background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+  .stage-panel{ overflow:hidden; }
+  .stage-head{ display:flex; justify-content:space-between; align-items:center; padding:0.9rem 1.15rem; border-bottom:1px solid var(--border-soft); gap:1rem; flex-wrap:wrap; }
+  .stage-head h2, .table-head h2{ font-family:'Sora', sans-serif; font-size:0.92rem; font-weight:600; margin:0; }
+  .frame-readout{ display:flex; align-items:baseline; gap:0.85rem; font-family:'IBM Plex Mono', monospace; font-size:0.75rem; color:var(--text-dim); }
+  .frame-readout b{ font-size:0.9rem; color:var(--text); font-weight:500; font-variant-numeric:tabular-nums; }
+  .strike-badge{ font-family:'IBM Plex Mono', monospace; font-size:0.62rem; letter-spacing:0.08em; text-transform:uppercase; padding:0.12rem 0.45rem; border-radius:3px; border:1px solid var(--border); color:var(--text-faint); transition:color 0.08s, border-color 0.08s, background 0.08s; }
+  .strike-badge.on{ color:#12161b; background:var(--amber); border-color:var(--amber); }
+  .stage{ position:relative; width:100%; background:var(--stage-bg); line-height:0; }
+  .stage canvas{ display:block; width:100%; height:auto; touch-action:none; }
+  .hintbar{ display:flex; flex-wrap:wrap; gap:1.1rem; align-items:center; padding:0.8rem 1.15rem; border-top:1px solid var(--border-soft); font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text-dim); }
+  .hintbar .k{ display:flex; align-items:center; gap:0.4rem; }
+  kbd{ font-family:'IBM Plex Mono', monospace; background:var(--surface-2); border:1px solid var(--border); border-bottom-width:2px; border-radius:4px; padding:0.05rem 0.4rem; color:var(--text); font-size:0.7rem; }
+  .hintbar .spacer{ margin-left:auto; color:var(--text-faint); }
+  .side{ display:flex; flex-direction:column; gap:1.5rem; }
+  .table-head{ display:flex; justify-content:space-between; align-items:center; padding:0.9rem 1.15rem; border-bottom:1px solid var(--border-soft); }
+  .table-head .count{ font-family:'IBM Plex Mono', monospace; font-size:0.7rem; color:var(--text-faint); }
+  .clip-row{ display:grid; grid-template-columns:1fr auto; gap:0.2rem 0.75rem; padding:0.7rem 1.15rem; border-bottom:1px solid var(--border-soft); transition:background 0.12s; }
+  .clip-row:last-child{ border-bottom:none; }
+  .clip-row.active{ background:var(--surface-2); }
+  .clip-name{ font-size:0.82rem; font-weight:600; color:var(--text); display:flex; align-items:center; gap:0.5rem; }
+  .clip-name .dot{ width:0.45rem; height:0.45rem; border-radius:50%; background:var(--border); }
+  .clip-row.active .clip-name .dot{ background:var(--teal); box-shadow:0 0 0 3px rgba(79,209,197,0.15); }
+  .clip-frames{ font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text-faint); font-variant-numeric:tabular-nums; text-align:right; }
+  .clip-src{ grid-column:1 / -1; font-family:'IBM Plex Mono', monospace; font-size:0.68rem; color:var(--text-dim); line-height:1.5; }
+  .clip-src em{ color:var(--amber); font-style:normal; }
+  .badge{ font-family:'IBM Plex Mono', monospace; font-size:0.6rem; letter-spacing:0.04em; text-transform:uppercase; padding:0.08rem 0.35rem; border-radius:3px; border:1px solid var(--border); color:var(--text-faint); }
+  .badge.proc{ color:var(--amber); border-color:var(--amber-dim); }
+  .badge.meas{ color:var(--teal); border-color:var(--teal-dim); }
+  .note{ padding:0.9rem 1.15rem; font-size:0.78rem; line-height:1.65; color:var(--text-dim); border-top:1px solid var(--border-soft); }
+  .note b{ color:var(--text); font-weight:600; }
+  footer{ margin-top:1.75rem; padding-top:1.25rem; border-top:1px solid var(--border-soft); font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text-faint); line-height:1.7; }
+  footer code{ background:var(--surface-2); padding:0.05rem 0.35rem; border-radius:3px; color:var(--text-dim); }
+  ::selection{ background:var(--teal-dim); color:#fff; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">RF-DETR keypoints &middot; playable</p>
+      <h1>Lunge Arena <span>&mdash; the captured lunge is the attack</span></h1>
+    </div>
+    <div class="stat-strip">
+      <div class="stat"><div class="stat-label">Score</div><div class="stat-value accent" id="statScore">0</div></div>
+      <div class="stat"><div class="stat-label">Combo</div><div class="stat-value teal" id="statCombo">&times;1</div></div>
+      <div class="stat"><div class="stat-label">Time</div><div class="stat-value" id="statTime">60.0</div></div>
+      <div class="stat"><div class="stat-label">Best</div><div class="stat-value" id="statBest">0</div></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel stage-panel">
+      <div class="stage-head">
+        <h2>Arena</h2>
+        <div class="frame-readout">
+          <span>state <b id="roState">idle</b></span>
+          <span>clip frame <b id="roFrame">&mdash;</b></span>
+          <span class="strike-badge" id="roStrike">strike</span>
+        </div>
+      </div>
+      <div class="stage"><canvas id="cv"></canvas></div>
+      <div class="hintbar">
+        <span class="k"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move</span>
+        <span class="k"><kbd>Space</kbd> jump</span>
+        <span class="k"><kbd>F</kbd> lunge</span>
+        <span class="k"><kbd>P</kbd> pause</span>
+        <span class="k"><kbd>R</kbd> restart</span>
+        <span class="spacer">hit targets with the lead foot or hand, mid-lunge</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="table-head"><h2>Clips driving the figure</h2><span class="count" id="clipCount"></span></div>
+        <div id="clipList"></div>
+        <div class="note">
+          Every frame above is <b>15 joint positions</b> &mdash; where a COCO-17 detection
+          actually put the hips, knees, ankles, shoulders, elbows, wrists and head. They are
+          hip-centred and multiplied by one scale factor that sizes the subject into this
+          arena; nothing is rebuilt at runtime. So the lunge covers the ground the subject
+          covered, drops as far as the body dropped, and foreshortens the way the real limbs
+          did. Only the walk is invented &mdash; and it is solved onto the same measured
+          bone lengths, so nothing changes shape between states.
+        </div>
+      </section>
+      <section class="panel">
+        <div class="table-head"><h2>How scoring works</h2></div>
+        <div class="note" style="border-top:none;">
+          The hitbox is read off the <b>measured pose</b>, not off the sprite: circles at the
+          lead ankle and lead wrist, live only during the lunge's strike window. The strike
+          sweeps forward with the step-out, so range is what the subject's own reach makes it.
+          You have to be in range <em>and</em> time the press. Each hit raises the combo;
+          letting a target cross the far edge resets it to &times;1.
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const DATA = {"points":["hipC","hipL","hipR","shC","shL","shR","headC","elL","wrL","elR","wrR","knL","anL","knR","anR"],"rig":{"headR":20.63,"stroke":0.86},"tuck":[0.0,0.0,18.7,-0.5,-18.7,0.5,-2.4,-89.4,25.5,-90.1,-30.4,-88.6,-26.2,-132.3,65.6,-59.4,37.4,-37.2,-10.3,-42.2,-46.1,-44.4,-2.4,55.9,25.6,97.6,-51.7,50.9,-11.7,81.3],"meta":{"source":"lunge_all_frames.json","fps":29.916666666666668,"n_frames":264,"detected":264,"speed":1.4,"smooth":3,"scale":0.44658},"clips":{"idle":{"fps":41.883,"pingpong":true,"source":"frames 79-106","note":"source frames <em>79&ndash;106</em>, the ready stance held in the seconds before the lunge &mdash; played out and back so the loop has no seam, and it ends where the lunge begins","frames":[[0.0,0.0,18.6,1.6,-18.6,-1.6,0.4,-87.6,27.8,-90.0,-27.0,-85.2,-19.4,-130.2,44.3,-39.1,11.5,-24.0,-45.1,-41.4,-78.7,-56.6,34.2,60.2,38.8,93.1,-60.1,39.9,-45.8,98.1],[0.0,0.0,18.6,1.8,-18.6,-1.8,0.2,-87.0,27.5,-89.4,-27.2,-84.5,-19.5,-129.7,43.9,-38.4,10.4,-22.7,-44.8,-40.5,-79.1,-54.9,34.1,61.7,38.6,93.8,-60.1,40.4,-45.8,98.7],[0.0,0.0,18.5,1.9,-18.5,-1.9,-0.0,-86.6,27.3,-89.3,-27.3,-83.9,-19.8,-129.5,43.5,-38.2,10.0,-22.4,-44.4,-39.7,-79.2,-53.4,33.8,62.1,38.5,94.6,-59.9,41.0,-45.8,99.3],[0.0,0.0,18.5,1.8,-18.5,-1.8,-0.0,-87.4,27.2,-90.2,-27.2,-84.6,-20.2,-130.5,43.8,-39.8,11.1,-24.9,-43.8,-39.9,-78.4,-53.6,33.8,61.9,38.8,94.6,-59.5,40.9,-45.5,99.3],[0.0,0.0,18.5,1.7,-18.5,-1.7,-0.1,-88.4,27.1,-91.5,-27.3,-85.2,-20.9,-131.2,44.2,-41.6,12.1,-27.3,-43.1,-40.3,-77.6,-54.0,34.3,62.0,39.2,94.7,-59.0,41.1,-45.2,99.5],[0.0,0.0,18.6,1.5,-18.6,-1.5,-0.3,-89.5,27.0,-92.9,-27.6,-86.0,-22.5,-132.2,44.8,-43.8,13.2,-30.2,-43.0,-40.7,-77.2,-55.0,35.3,63.9,39.4,94.8,-58.4,41.6,-45.0,99.8],[0.0,0.0,18.7,1.4,-18.7,-1.4,-0.9,-89.9,26.6,-93.7,-28.3,-86.1,-24.2,-132.5,45.2,-44.9,14.0,-32.2,-43.9,-40.6,-77.9,-56.1,35.6,64.7,39.2,95.2,-58.2,42.3,-45.1,100.5],[0.0,0.0,18.8,1.2,-18.8,-1.2,-1.2,-90.4,26.4,-94.4,-28.8,-86.4,-25.5,-133.1,45.6,-45.9,14.5,-34.6,-44.9,-40.6,-78.0,-57.7,36.1,65.3,39.2,95.2,-58.0,42.6,-45.1,100.7],[0.0,0.0,18.8,1.2,-18.8,-1.2,-1.7,-90.4,26.0,-94.6,-29.3,-86.3,-26.0,-133.2,45.6,-46.0,13.7,-35.5,-45.5,-40.8,-78.2,-59.0,36.2,65.3,39.2,95.1,-58.0,42.6,-45.0,100.7],[0.0,0.0,18.8,1.2,-18.8,-1.2,-2.0,-90.2,25.6,-94.3,-29.6,-86.1,-26.7,-133.0,45.4,-45.9,13.3,-35.9,-46.0,-40.6,-77.7,-60.4,36.4,65.2,39.4,95.0,-57.9,42.5,-44.8,100.7],[0.0,0.0,18.7,1.2,-18.7,-1.2,-2.7,-89.8,25.0,-93.8,-30.4,-85.8,-27.5,-132.8,44.7,-45.6,12.6,-35.6,-46.9,-40.4,-77.4,-61.2,36.0,65.0,39.2,94.8,-57.9,42.2,-45.0,100.6],[0.0,0.0,18.6,1.2,-18.6,-1.2,-3.1,-89.3,24.7,-93.2,-30.8,-85.5,-28.1,-132.6,44.1,-45.1,12.2,-34.6,-47.5,-39.9,-76.8,-61.4,35.7,64.3,39.1,94.7,-57.8,41.9,-45.1,100.4],[0.0,0.0,18.6,1.3,-18.6,-1.3,-3.3,-89.1,24.5,-92.9,-31.0,-85.3,-28.4,-132.6,43.4,-44.6,11.2,-32.9,-48.0,-39.6,-77.1,-61.2,35.4,63.5,39.0,94.6,-57.6,41.6,-45.2,100.2],[0.0,0.0,18.6,1.4,-18.6,-1.4,-3.4,-88.7,24.3,-92.6,-31.1,-84.8,-28.5,-132.1,43.0,-44.1,11.2,-31.5,-48.4,-39.1,-78.3,-60.6,35.1,60.8,39.0,94.8,-57.7,41.7,-45.4,100.4],[0.0,0.0,18.7,1.6,-18.7,-1.6,-3.6,-88.5,23.9,-92.5,-31.2,-84.6,-28.8,-131.8,42.6,-43.8,10.3,-30.5,-49.1,-38.9,-79.6,-59.3,35.4,60.9,38.7,94.8,-58.0,41.7,-45.9,100.5],[0.0,0.0,18.8,1.7,-18.8,-1.7,-4.0,-88.4,23.4,-92.5,-31.5,-84.4,-29.1,-131.4,42.2,-43.5,9.7,-30.5,-49.4,-38.4,-80.3,-57.4,35.6,61.8,38.2,95.0,-58.5,41.8,-46.4,100.7],[0.0,0.0,19.0,1.8,-19.0,-1.8,-4.3,-88.8,23.2,-93.0,-31.7,-84.6,-29.4,-131.5,42.0,-43.5,9.2,-30.8,-48.8,-38.7,-80.0,-56.3,36.4,64.6,37.8,95.0,-58.7,41.9,-46.9,100.9],[0.0,0.0,18.9,1.8,-18.9,-1.8,-4.4,-89.0,23.1,-93.4,-31.9,-84.7,-29.4,-131.6,41.9,-43.4,10.3,-31.9,-47.9,-38.6,-78.4,-55.7,36.4,65.0,37.4,95.5,-58.9,42.4,-47.3,101.4],[0.0,0.0,18.8,1.8,-18.8,-1.8,-4.3,-89.0,23.5,-93.6,-32.0,-84.5,-29.1,-131.7,42.3,-43.4,11.8,-32.8,-46.9,-38.6,-77.0,-55.9,36.2,64.3,37.1,96.1,-58.8,43.1,-47.5,102.2],[0.0,0.0,18.9,1.7,-18.9,-1.7,-4.1,-89.3,23.8,-93.9,-32.0,-84.7,-28.7,-132.0,43.0,-43.9,13.3,-33.8,-46.4,-38.6,-76.6,-57.1,36.0,63.9,36.9,96.4,-58.8,43.5,-47.5,102.5],[0.0,0.0,19.0,1.6,-19.0,-1.6,-4.0,-89.6,24.1,-94.2,-32.0,-84.9,-28.5,-132.2,43.6,-44.5,14.1,-34.4,-46.3,-39.0,-77.3,-58.7,35.9,63.8,36.9,96.4,-58.7,43.6,-47.4,102.6],[0.0,0.0,19.0,1.5,-19.0,-1.5,-3.8,-89.9,24.3,-94.6,-31.8,-85.2,-28.3,-132.5,44.1,-45.1,14.5,-34.6,-46.5,-39.5,-77.9,-59.2,35.7,63.3,36.9,96.3,-58.7,43.4,-47.4,102.4],[0.0,0.0,18.9,1.5,-18.9,-1.5,-3.5,-89.7,24.4,-94.4,-31.5,-85.0,-28.1,-132.2,44.6,-45.0,14.6,-34.2,-46.5,-39.3,-78.2,-58.3,35.3,62.4,36.9,96.3,-58.7,43.5,-47.4,102.5],[0.0,0.0,18.9,1.5,-18.9,-1.5,-3.1,-89.6,24.8,-94.3,-31.0,-85.0,-27.7,-132.1,45.1,-45.1,14.8,-33.9,-46.5,-39.2,-78.3,-57.3,34.7,61.4,37.1,96.5,-58.5,43.3,-47.1,102.3],[0.0,0.0,18.8,1.5,-18.8,-1.5,-2.7,-89.6,25.2,-94.1,-30.6,-85.1,-27.3,-132.0,45.5,-45.2,15.0,-33.8,-46.2,-39.0,-78.3,-57.2,34.2,61.9,37.5,96.5,-58.2,43.0,-46.6,101.9],[0.0,0.0,18.6,1.4,-18.6,-1.4,-2.6,-89.6,25.5,-93.9,-30.7,-85.3,-27.0,-131.9,45.8,-45.4,15.5,-34.1,-46.4,-39.3,-78.1,-57.6,33.3,61.0,38.3,96.9,-57.8,42.7,-45.9,101.4],[0.0,0.0,18.5,1.4,-18.5,-1.4,-2.7,-89.4,25.6,-93.6,-31.0,-85.2,-26.9,-131.7,46.0,-45.5,15.9,-34.3,-46.7,-39.5,-78.2,-57.9,32.6,60.1,39.0,97.2,-57.6,42.6,-45.5,101.2],[0.0,0.0,18.4,1.2,-18.4,-1.2,-3.0,-88.5,25.4,-92.6,-31.4,-84.5,-27.1,-131.0,46.3,-45.2,16.5,-34.0,-47.0,-38.8,-78.1,-57.6,31.4,57.9,39.8,98.1,-57.3,43.0,-44.8,101.6]]},"lunge":{"fps":41.883,"active":[17,35],"source":"frames 106-134 + 4-frame hold + 154-188","note":"source frames <em>106&ndash;134</em> (step out and strike), 4 frames held at the deepest pose (frame 152), then <em>154&ndash;188</em> (both recovery steps). The hips carry their measured travel with them: <em>-203 px</em> out, <em>+216 px</em> back. Strike window: clip frames 18&ndash;36.","frames":[[0.0,0.0,18.4,1.2,-18.4,-1.2,-3.0,-88.5,25.4,-92.6,-31.4,-84.5,-27.1,-131.0,46.3,-45.2,16.5,-34.0,-47.0,-38.8,-78.1,-57.6,31.4,57.9,39.8,98.1,-57.3,43.0,-44.8,101.6],[0.0,0.0,18.1,1.0,-18.1,-1.0,-2.7,-87.5,25.6,-91.7,-31.0,-83.4,-26.6,-129.9,47.7,-44.7,18.1,-33.4,-46.7,-37.8,-77.8,-57.2,31.1,61.3,41.9,98.7,-57.3,43.3,-42.4,101.8],[0.0,0.0,17.8,0.8,-17.8,-0.8,-2.4,-86.6,25.8,-90.7,-30.5,-82.4,-26.0,-128.8,49.0,-44.2,19.9,-32.9,-46.3,-36.6,-77.3,-56.7,30.9,64.6,44.1,99.4,-57.3,43.7,-40.1,101.9],[0.0,0.0,18.1,0.8,-18.1,-0.8,-1.2,-87.1,27.1,-91.5,-29.6,-82.6,-25.0,-128.6,52.4,-46.5,26.8,-33.8,-45.4,-38.5,-76.2,-59.2,33.9,67.7,49.9,98.1,-58.1,41.4,-38.3,99.1],[0.0,0.0,18.7,0.8,-18.7,-0.8,-0.5,-87.8,28.1,-92.3,-29.0,-83.2,-24.6,-129.0,54.8,-49.0,32.5,-34.8,-44.8,-40.6,-75.4,-61.7,36.6,66.8,53.8,96.8,-58.6,39.2,-38.4,96.5],[0.0,0.0,19.2,1.1,-19.2,-1.1,-0.1,-88.2,28.7,-93.0,-29.0,-83.4,-24.5,-128.8,58.1,-52.7,43.0,-36.6,-48.1,-43.6,-77.1,-66.7,39.9,64.6,59.5,94.9,-60.7,35.4,-42.6,92.7],[0.0,0.0,18.9,1.4,-18.9,-1.4,-1.6,-88.0,26.8,-92.7,-30.1,-83.2,-26.0,-127.3,58.5,-56.2,57.7,-38.9,-56.2,-47.0,-84.3,-73.0,40.6,62.1,62.4,94.4,-64.2,32.0,-53.0,92.0],[0.0,0.0,18.5,1.6,-18.5,-1.6,-4.5,-87.9,24.1,-92.7,-33.1,-83.2,-29.0,-125.9,60.3,-61.9,78.4,-43.4,-68.0,-54.3,-97.0,-83.0,42.9,60.5,67.3,93.3,-69.0,28.2,-71.6,88.6],[0.0,0.0,18.4,1.8,-18.4,-1.8,-7.8,-88.3,21.3,-92.4,-36.8,-84.2,-33.8,-123.7,62.6,-67.7,99.6,-50.5,-78.1,-65.7,-111.3,-93.4,46.1,60.0,73.1,92.2,-71.2,26.1,-92.0,82.3],[0.0,0.0,18.3,1.5,-18.3,-1.5,-12.1,-90.0,17.5,-93.1,-41.6,-86.9,-38.5,-122.5,62.4,-75.0,107.8,-60.1,-83.7,-81.6,-124.2,-103.1,51.8,58.3,84.1,89.1,-74.6,26.4,-114.3,69.2],[0.0,0.0,18.2,1.1,-18.2,-1.1,-16.7,-92.2,13.3,-93.8,-46.7,-90.6,-43.8,-121.8,60.2,-79.7,107.0,-67.3,-87.3,-96.0,-133.2,-110.1,56.3,54.7,96.1,85.9,-76.2,25.3,-127.9,58.6],[0.0,0.0,17.7,0.6,-17.7,-0.6,-20.5,-94.3,9.6,-95.0,-50.6,-93.6,-47.1,-122.3,56.5,-83.1,101.0,-71.1,-88.7,-105.5,-138.2,-114.3,59.3,51.4,105.5,83.3,-78.9,24.0,-135.5,52.1],[0.0,0.0,17.9,0.6,-17.9,-0.6,-21.8,-94.4,8.1,-94.7,-51.7,-94.2,-49.0,-122.0,54.1,-82.3,96.4,-69.9,-90.3,-107.8,-139.9,-115.5,60.6,48.4,110.9,82.7,-76.6,23.7,-133.5,53.7],[0.0,0.0,17.9,0.2,-17.9,-0.2,-21.7,-93.9,7.6,-93.9,-51.0,-93.9,-48.9,-121.8,52.0,-81.4,93.9,-67.4,-90.1,-107.6,-140.6,-116.2,63.0,45.6,114.7,82.0,-73.8,25.2,-127.3,58.0],[0.0,0.0,17.9,-0.2,-17.9,0.2,-22.8,-92.9,5.6,-93.0,-51.1,-92.8,-48.9,-120.7,48.5,-79.5,90.6,-63.7,-90.6,-108.0,-140.3,-117.3,64.4,41.3,118.1,80.2,-71.2,27.9,-116.4,67.0],[0.0,0.0,17.8,-0.5,-17.8,0.5,-25.2,-90.4,2.8,-90.1,-53.2,-90.8,-50.7,-118.5,44.7,-74.8,86.7,-57.9,-92.8,-107.2,-142.5,-117.5,66.2,40.2,120.6,76.4,-69.8,27.1,-103.6,75.0],[0.0,0.0,17.3,-0.6,-17.3,0.6,-27.3,-86.8,0.1,-86.0,-54.6,-87.6,-51.7,-114.8,41.7,-68.8,83.1,-51.1,-93.3,-105.2,-141.7,-115.9,66.8,40.1,123.8,72.4,-68.9,25.5,-91.9,79.8],[0.0,0.0,17.3,-0.1,-17.3,0.1,-27.9,-83.5,-1.4,-81.9,-54.4,-85.2,-53.2,-111.7,40.7,-62.7,81.5,-43.8,-93.9,-102.6,-142.2,-113.7,69.9,40.5,128.4,67.9,-67.1,20.5,-81.5,78.5],[0.0,0.0,16.8,0.0,-16.8,-0.0,-28.0,-81.0,-2.2,-78.7,-53.8,-83.3,-53.6,-109.6,40.7,-58.0,81.7,-37.9,-92.3,-99.6,-140.6,-110.9,71.8,39.7,131.9,64.8,-65.6,17.2,-72.2,76.4],[0.0,0.0,16.7,0.3,-16.7,-0.3,-29.6,-79.0,-4.1,-76.6,-55.1,-81.4,-55.3,-107.8,39.3,-54.0,81.5,-32.4,-91.6,-97.1,-142.5,-108.8,73.4,38.0,133.8,62.0,-64.4,14.5,-64.7,75.1],[0.0,0.0,16.2,0.2,-16.2,-0.2,-32.7,-76.8,-7.2,-74.3,-58.1,-79.4,-57.6,-106.0,36.2,-50.7,79.2,-27.4,-94.1,-95.0,-145.7,-106.5,74.2,37.8,134.5,60.2,-63.3,14.2,-59.4,75.4],[0.0,0.0,16.2,0.0,-16.2,-0.0,-35.9,-76.0,-11.0,-73.9,-60.7,-78.1,-60.8,-104.0,32.3,-49.8,76.2,-24.3,-97.5,-93.8,-148.0,-105.7,75.3,37.0,135.3,59.3,-62.4,14.5,-55.1,75.7],[0.0,0.0,16.5,0.2,-16.5,-0.2,-38.3,-75.7,-14.1,-73.6,-62.5,-77.8,-64.3,-102.2,29.3,-49.3,74.2,-22.6,-101.5,-93.4,-150.1,-105.4,75.9,36.0,135.6,59.1,-61.9,15.0,-52.1,76.0],[0.0,0.0,16.6,0.3,-16.6,-0.3,-40.0,-75.1,-16.2,-73.2,-63.7,-77.1,-66.9,-100.3,27.2,-49.1,72.7,-22.0,-101.7,-91.7,-151.0,-104.6,75.4,35.0,135.5,60.2,-61.6,15.9,-49.8,76.6],[0.0,0.0,16.6,0.3,-16.6,-0.3,-41.6,-74.2,-17.7,-72.6,-65.4,-75.9,-68.7,-99.4,26.4,-48.8,71.7,-22.5,-101.5,-90.0,-152.7,-103.2,74.7,35.3,133.5,61.4,-61.5,17.0,-48.6,77.6],[0.0,0.0,16.5,-0.0,-16.5,0.0,-42.6,-73.4,-18.7,-72.3,-66.5,-74.6,-69.6,-99.1,26.0,-49.0,70.9,-24.2,-101.4,-88.4,-153.6,-101.3,74.8,36.9,132.3,63.8,-60.9,18.6,-47.5,78.9],[0.0,0.0,16.4,-0.3,-16.4,0.3,-43.2,-73.2,-19.3,-72.5,-67.0,-73.9,-70.3,-99.0,25.9,-49.7,70.8,-27.2,-100.9,-87.3,-153.9,-99.8,75.0,38.1,131.4,65.7,-60.7,19.6,-47.0,79.8],[0.0,0.0,16.5,-0.5,-16.5,0.5,-43.1,-73.4,-19.4,-72.9,-66.8,-73.9,-70.6,-99.3,27.1,-50.8,72.4,-29.6,-100.6,-86.8,-153.8,-98.7,75.2,38.7,132.1,67.6,-60.6,20.0,-46.9,80.3],[0.0,0.0,16.5,-0.6,-16.5,0.6,-42.9,-73.6,-19.2,-73.1,-66.5,-74.1,-70.5,-99.5,27.6,-52.3,73.9,-32.0,-100.4,-86.5,-153.5,-98.0,75.1,38.6,132.0,68.0,-60.7,20.2,-47.2,80.2],[0.0,0.0,15.9,-0.0,-15.9,0.0,-39.6,-71.4,-18.5,-72.9,-60.7,-69.9,-69.2,-96.8,28.7,-53.9,73.5,-36.5,-99.5,-78.9,-150.0,-92.2,72.9,37.3,132.3,62.4,-61.1,13.0,-43.8,72.0],[0.0,0.0,15.9,-0.0,-15.9,0.0,-39.6,-71.4,-18.5,-72.9,-60.7,-69.9,-69.2,-96.8,28.7,-53.9,73.5,-36.5,-99.5,-78.9,-150.0,-92.2,72.9,37.3,132.3,62.4,-61.1,13.0,-43.8,72.0],[0.0,0.0,15.9,-0.0,-15.9,0.0,-39.6,-71.4,-18.5,-72.9,-60.7,-69.9,-69.2,-96.8,28.7,-53.9,73.5,-36.5,-99.5,-78.9,-150.0,-92.2,72.9,37.3,132.3,62.4,-61.1,13.0,-43.8,72.0],[0.0,0.0,15.9,-0.0,-15.9,0.0,-39.6,-71.4,-18.5,-72.9,-60.7,-69.9,-69.2,-96.8,28.7,-53.9,73.5,-36.5,-99.5,-78.9,-150.0,-92.2,72.9,37.3,132.3,62.4,-61.1,13.0,-43.8,72.0],[0.0,0.0,16.4,-0.2,-16.4,0.2,-39.1,-70.8,-17.1,-74.2,-61.2,-67.3,-68.5,-97.8,28.1,-52.8,72.7,-33.1,-102.7,-71.3,-145.0,-91.6,71.6,38.6,130.7,65.1,-60.7,13.9,-46.0,74.3],[0.0,0.0,16.6,-0.5,-16.6,0.5,-39.0,-71.1,-16.5,-75.1,-61.6,-67.1,-68.4,-99.9,28.3,-52.7,70.9,-30.2,-101.9,-66.6,-141.0,-90.7,71.5,40.5,128.4,67.4,-61.4,15.0,-48.6,76.1],[0.0,0.0,16.6,-1.0,-16.6,1.0,-38.5,-70.9,-15.8,-75.4,-61.3,-66.4,-67.8,-101.4,26.9,-52.7,67.2,-27.6,-97.7,-61.3,-135.6,-88.4,71.6,43.2,126.1,70.7,-61.7,17.2,-51.8,78.9],[0.0,0.0,16.6,-1.5,-16.6,1.5,-37.5,-71.5,-15.0,-76.7,-60.1,-66.4,-67.0,-103.5,27.2,-53.3,62.2,-26.5,-94.2,-57.5,-130.3,-86.6,70.8,45.2,122.7,73.8,-62.3,19.5,-55.3,81.4],[0.0,0.0,16.8,-1.7,-16.8,1.7,-34.8,-72.0,-12.3,-77.6,-57.3,-66.3,-63.5,-104.7,28.3,-53.9,56.6,-27.6,-90.0,-54.7,-123.4,-86.3,69.6,46.7,119.3,77.2,-61.1,22.2,-58.7,84.3],[0.0,0.0,17.4,-1.7,-17.4,1.7,-31.7,-74.3,-9.2,-80.2,-54.1,-68.4,-60.6,-107.2,31.2,-56.2,49.9,-32.1,-86.8,-54.5,-116.7,-87.4,67.7,46.5,113.7,79.1,-61.1,24.0,-63.0,85.8],[0.0,0.0,17.7,-2.1,-17.7,2.1,-29.3,-76.3,-7.1,-82.4,-51.4,-70.2,-57.1,-109.4,34.6,-57.5,41.2,-37.2,-82.9,-53.7,-109.4,-87.7,64.0,45.0,106.4,81.6,-60.7,27.2,-68.4,88.1],[0.0,0.0,17.4,-2.5,-17.4,2.5,-27.6,-78.7,-6.3,-85.0,-48.9,-72.4,-55.6,-112.0,36.9,-58.6,30.9,-42.5,-80.2,-52.4,-103.3,-85.7,60.1,45.7,98.1,84.0,-61.5,29.9,-75.7,89.8],[0.0,0.0,17.4,-2.8,-17.4,2.8,-26.6,-79.8,-5.6,-86.7,-47.6,-73.0,-54.9,-113.6,38.0,-58.9,22.4,-46.3,-77.2,-49.3,-97.9,-83.0,54.6,47.1,89.2,86.7,-60.8,33.8,-83.3,91.5],[0.0,0.0,16.8,-2.6,-16.8,2.6,-26.1,-80.2,-5.4,-87.6,-46.7,-72.8,-54.7,-115.1,36.0,-58.9,14.3,-48.4,-73.9,-45.4,-93.9,-78.3,50.4,51.6,80.8,90.1,-58.3,37.0,-89.4,93.2],[0.0,0.0,16.5,-2.3,-16.5,2.3,-25.7,-79.7,-4.7,-87.9,-46.7,-71.4,-54.3,-115.4,35.1,-57.9,8.0,-48.2,-67.2,-39.5,-89.6,-71.7,45.3,54.0,71.7,93.9,-56.4,40.8,-92.0,95.0],[0.0,0.0,15.9,-2.0,-15.9,2.0,-24.7,-78.9,-3.6,-87.9,-45.8,-69.9,-52.2,-115.7,34.8,-56.3,3.4,-45.8,-61.1,-33.5,-85.4,-62.8,42.3,56.4,64.9,98.0,-56.3,42.1,-87.1,97.6],[0.0,0.0,16.2,-1.8,-16.2,1.8,-23.1,-78.2,-1.7,-87.5,-44.5,-69.0,-50.2,-115.4,35.3,-54.9,2.1,-42.4,-54.2,-28.7,-82.5,-54.4,41.0,58.0,60.0,101.0,-58.2,42.1,-74.3,100.7],[0.0,0.0,16.7,-1.8,-16.7,1.8,-22.5,-78.5,-0.9,-87.9,-44.1,-69.2,-48.7,-115.9,34.6,-54.5,2.8,-38.8,-50.4,-26.9,-82.6,-47.9,41.3,58.3,56.6,102.5,-59.5,40.8,-57.0,101.4],[0.0,0.0,16.7,-2.0,-16.7,2.0,-23.0,-78.8,-1.2,-88.3,-44.7,-69.3,-47.8,-116.6,33.8,-54.0,3.3,-34.2,-47.1,-25.9,-83.6,-41.4,44.7,58.8,54.5,102.2,-58.7,41.6,-41.4,100.9],[0.0,0.0,16.7,-2.2,-16.7,2.2,-24.1,-79.6,-1.8,-89.1,-46.4,-70.2,-46.9,-117.8,33.0,-53.6,2.5,-30.4,-46.5,-25.8,-85.3,-36.3,49.7,58.4,53.7,102.7,-56.8,43.3,-33.1,100.5],[0.0,0.0,17.2,-2.7,-17.2,2.7,-24.7,-79.9,-2.0,-88.9,-47.4,-70.9,-45.7,-119.2,32.5,-52.8,3.0,-29.1,-46.8,-26.2,-85.4,-32.4,53.8,56.4,57.7,102.7,-54.7,45.7,-31.4,102.2],[0.0,0.0,17.9,-2.6,-17.9,2.6,-25.6,-80.9,-2.6,-89.6,-48.6,-72.2,-44.2,-120.9,32.2,-53.0,4.2,-30.6,-47.9,-27.2,-86.3,-32.6,56.4,54.0,66.4,103.6,-54.3,46.1,-35.6,104.1],[0.0,0.0,18.4,-2.8,-18.4,2.8,-26.0,-81.8,-2.7,-90.6,-49.4,-72.9,-41.0,-121.2,31.5,-54.2,5.5,-32.7,-48.4,-27.6,-86.5,-34.2,57.4,50.4,77.0,102.1,-55.2,45.7,-41.9,105.1],[0.0,0.0,18.6,-3.0,-18.6,3.0,-26.1,-82.5,-2.5,-91.7,-49.7,-73.4,-40.3,-121.5,30.7,-55.6,5.9,-34.1,-48.8,-28.1,-86.8,-36.0,58.5,50.1,87.2,101.6,-56.6,46.1,-49.2,106.7],[0.0,0.0,18.5,-3.3,-18.5,3.3,-25.2,-82.8,-1.1,-91.9,-49.2,-73.6,-37.5,-120.9,30.9,-55.6,5.9,-34.3,-47.7,-27.9,-86.0,-37.0,58.2,50.2,93.6,101.7,-56.6,49.0,-56.5,109.2],[0.0,0.0,18.4,-3.3,-18.4,3.3,-24.6,-84.1,-0.4,-93.3,-48.9,-75.0,-36.9,-122.3,32.4,-56.6,5.9,-35.8,-46.8,-29.2,-84.5,-37.9,58.8,52.6,98.0,102.9,-56.1,51.4,-63.7,109.8],[0.0,0.0,18.5,-3.2,-18.5,3.2,-23.4,-85.8,1.2,-95.2,-47.9,-76.4,-35.3,-123.9,33.8,-58.4,6.8,-37.2,-45.5,-29.9,-82.7,-39.1,59.8,53.9,97.5,103.9,-54.8,50.9,-69.3,108.9],[0.0,0.0,18.8,-3.2,-18.8,3.2,-22.0,-86.3,2.7,-95.9,-46.8,-76.7,-34.0,-123.8,35.6,-59.1,7.4,-36.9,-44.5,-30.0,-80.9,-38.3,60.2,55.4,94.2,106.0,-54.4,48.0,-71.3,107.7],[0.0,0.0,19.2,-2.9,-19.2,2.9,-20.5,-85.7,5.1,-95.3,-46.0,-76.1,-32.9,-123.1,36.6,-58.6,9.1,-36.2,-44.2,-29.4,-79.9,-36.7,58.0,55.0,86.5,106.9,-57.9,43.7,-69.5,106.0],[0.0,0.0,19.7,-2.2,-19.7,2.2,-19.1,-84.6,6.9,-93.9,-45.2,-75.3,-29.9,-121.4,38.8,-56.3,10.8,-34.2,-44.3,-29.1,-78.5,-34.1,55.7,54.6,77.9,107.1,-61.9,41.2,-62.8,104.6],[0.0,0.0,20.3,-1.7,-20.3,1.7,-18.0,-84.2,8.6,-93.1,-44.6,-75.3,-29.3,-121.6,40.7,-55.0,14.2,-32.5,-44.2,-30.1,-77.9,-31.7,54.1,54.9,68.5,104.9,-65.4,39.0,-55.2,102.6],[0.0,0.0,20.6,-1.2,-20.6,1.2,-16.6,-83.8,10.3,-91.8,-43.4,-75.7,-27.8,-121.8,41.8,-53.0,19.5,-27.1,-43.3,-30.8,-76.7,-26.5,53.2,57.9,60.0,103.4,-65.5,39.1,-52.0,102.4],[0.0,0.0,20.2,-1.0,-20.2,1.0,-15.1,-83.3,12.5,-90.6,-42.7,-75.9,-26.0,-121.7,41.4,-49.8,25.7,-17.6,-41.9,-30.5,-75.1,-18.2,52.3,62.1,53.2,102.5,-65.5,40.0,-53.6,102.5],[0.0,0.0,19.7,-0.3,-19.7,0.3,-13.6,-83.3,14.4,-90.0,-41.6,-76.7,-23.8,-121.7,38.0,-46.5,33.0,-6.6,-42.3,-30.3,-71.6,-7.9,50.0,63.9,47.5,102.7,-65.9,41.5,-58.8,103.6],[0.0,0.0,19.6,-0.0,-19.6,0.0,-11.8,-83.8,16.4,-90.2,-40.0,-77.3,-21.2,-122.1,35.3,-43.0,41.4,3.4,-43.3,-29.7,-66.1,2.5,47.6,63.6,44.2,103.9,-65.5,43.5,-61.8,105.0],[0.0,0.0,20.0,0.3,-20.0,-0.3,-10.6,-84.7,18.1,-90.7,-39.4,-78.7,-19.3,-123.2,33.0,-42.2,46.1,6.6,-45.1,-29.7,-59.5,10.2,43.4,63.2,40.3,106.4,-65.5,46.4,-65.1,107.5],[0.0,0.0,20.5,0.2,-20.5,-0.2,-9.2,-86.2,20.3,-92.1,-38.7,-80.3,-16.8,-125.2,34.6,-43.3,49.1,5.6,-44.3,-31.5,-50.6,9.4,40.2,64.5,37.7,109.4,-63.7,50.5,-67.0,110.1],[0.0,0.0,20.8,-0.2,-20.8,0.2,-7.9,-87.2,22.3,-93.0,-38.0,-81.4,-14.7,-126.7,37.2,-44.6,50.0,2.8,-41.5,-33.7,-42.1,3.4,36.2,66.7,34.8,113.4,-61.5,54.9,-68.6,113.8],[0.0,0.0,20.5,-0.3,-20.5,0.3,-6.2,-88.6,24.0,-94.7,-36.5,-82.6,-12.5,-128.6,40.1,-47.4,52.7,0.1,-36.1,-37.0,-34.0,-4.3,32.8,67.7,33.3,116.8,-57.1,57.5,-68.6,116.7]],"root":[0.0,-2.4,-4.8,-10.7,-14.6,-20.0,-23.0,-28.0,-34.5,-46.8,-60.9,-71.8,-81.4,-92.5,-108.2,-127.1,-145.2,-162.5,-173.7,-182.4,-188.6,-192.9,-195.9,-198.2,-199.4,-200.3,-200.5,-200.5,-200.2,-202.8,-202.8,-202.8,-202.8,-201.0,-198.6,-195.5,-191.7,-188.1,-183.1,-176.9,-168.4,-158.7,-148.8,-139.8,-132.7,-126.9,-121.6,-116.4,-110.7,-105.2,-99.0,-92.4,-84.6,-76.3,-67.1,-58.1,-49.1,-39.4,-29.9,-20.7,-13.1,-7.0,-1.6,2.2,6.3,9.0,11.7,13.2]},"walk":{"fps":38.71,"loop":true,"source":"procedural","note":"there is no walk cycle anywhere in the source clip &mdash; the subject stands, lunges, stands. This one is generated from the measured rest pose &mdash; torso, head and arm carriage measured, the ready stance's split legs averaged into one straight leg to swing around: sinusoidal swing on the leg channels, counter-swing on the arms, solved onto the subject's own bone lengths.","frames":[[0.0,0.0,18.7,-0.5,-18.7,0.5,-2.4,-89.4,25.5,-90.1,-30.4,-88.6,-26.2,-132.3,43.6,-42.9,10.1,-30.1,-47.3,-41.0,-78.6,-58.5,17.0,59.7,15.5,109.9,-20.5,60.7,9.4,101.1],[0.0,0.0,18.7,-0.2,-18.7,0.2,-1.1,-89.4,26.9,-89.7,-29.0,-89.1,-24.9,-132.3,39.8,-40.8,5.6,-29.8,-40.7,-39.8,-72.9,-55.8,26.6,59.5,33.2,109.3,-30.1,59.4,-2.1,101.1],[0.0,0.0,18.7,-0.0,-18.7,0.0,-0.1,-89.4,27.8,-89.4,-28.1,-89.4,-23.9,-132.4,35.7,-39.5,1.1,-30.1,-34.7,-39.2,-67.6,-53.6,35.4,57.8,49.3,106.1,-38.8,56.8,-14.6,100.9],[0.0,0.0,18.7,0.1,-18.7,-0.1,0.3,-89.4,28.2,-89.3,-27.7,-89.5,-23.6,-132.4,31.7,-38.9,-3.3,-30.9,-30.0,-39.0,-63.4,-52.0,42.7,55.3,62.7,101.4,-45.9,53.7,-27.4,100.4],[0.0,0.0,18.7,-0.0,-18.7,0.0,-0.1,-89.4,27.8,-89.4,-28.1,-89.4,-23.9,-132.4,28.0,-38.9,-7.2,-32.0,-26.9,-38.8,-60.8,-50.7,48.0,52.6,72.4,96.5,-51.0,50.8,-39.8,99.9],[0.0,0.0,18.7,-0.2,-18.7,0.2,-1.1,-89.4,26.9,-89.7,-29.0,-89.1,-24.9,-132.3,24.9,-39.2,-10.5,-33.1,-25.8,-38.6,-59.9,-49.8,51.2,50.5,78.3,92.8,-54.1,48.9,-51.4,99.2],[0.0,0.0,18.7,-0.5,-18.7,0.5,-2.4,-89.4,25.5,-90.1,-30.4,-88.6,-26.2,-132.3,22.8,-39.6,-12.6,-33.8,-26.4,-38.2,-60.6,-49.2,52.3,49.5,80.3,91.3,-55.1,48.5,-61.2,98.4],[0.0,0.0,18.7,-0.8,-18.7,0.8,-3.8,-89.3,24.2,-90.5,-31.7,-88.1,-27.6,-132.3,22.2,-40.0,-13.2,-33.9,-28.5,-37.7,-62.5,-48.9,51.2,49.9,78.3,92.3,-54.1,49.5,-68.5,97.7],[0.0,0.0,18.7,-1.0,-18.7,1.0,-4.8,-89.3,23.2,-90.8,-32.7,-87.8,-28.6,-132.2,23.3,-40.2,-11.9,-33.4,-31.5,-37.2,-65.4,-49.2,48.0,51.6,72.4,95.6,-51.0,51.8,-72.5,97.3],[0.0,0.0,18.7,-1.1,-18.7,1.1,-5.1,-89.3,22.8,-90.9,-33.0,-87.7,-28.9,-132.2,26.3,-40.4,-8.7,-32.5,-35.3,-37.1,-68.7,-50.1,42.7,54.2,67.0,98.1,-45.8,54.8,-68.5,99.7],[0.0,0.0,18.7,-1.0,-18.7,1.0,-4.8,-89.3,23.2,-90.8,-32.7,-87.8,-28.6,-132.2,31.1,-40.8,-3.6,-31.4,-39.3,-37.7,-72.2,-52.0,35.4,56.9,63.5,98.5,-38.7,57.8,-55.5,105.2],[0.0,0.0,18.7,-0.8,-18.7,0.8,-3.8,-89.3,24.2,-90.5,-31.7,-88.1,-27.6,-132.3,37.1,-41.6,2.9,-30.6,-43.4,-38.9,-75.5,-54.9,26.6,58.9,56.5,99.3,-30.1,59.9,-39.6,109.3],[0.0,0.0,18.7,-0.5,-18.7,0.5,-2.4,-89.4,25.5,-90.1,-30.4,-88.6,-26.2,-132.3,43.6,-42.9,10.1,-30.1,-47.3,-41.0,-78.6,-58.5,17.0,59.7,46.9,100.1,-20.5,60.7,-22.0,111.0],[0.0,0.0,18.7,-0.2,-18.7,0.2,-1.1,-89.4,26.9,-89.7,-29.0,-89.1,-24.9,-132.3,50.0,-44.8,17.2,-30.3,-51.1,-43.5,-81.4,-62.7,7.4,58.9,35.4,100.7,-10.9,59.9,-4.3,109.8],[0.0,0.0,18.7,-0.0,-18.7,0.0,-0.1,-89.4,27.8,-89.4,-28.1,-89.4,-23.9,-132.4,55.4,-47.0,23.3,-31.0,-54.6,-46.3,-83.9,-66.9,-1.3,56.8,22.9,100.8,-2.1,57.9,11.9,106.2],[0.0,0.0,18.7,0.1,-18.7,-0.1,0.3,-89.4,28.2,-89.3,-27.7,-89.5,-23.6,-132.4,59.4,-49.5,28.0,-32.1,-57.8,-48.9,-86.3,-70.7,-8.4,53.8,10.1,100.6,5.2,55.2,25.2,101.3],[0.0,0.0,18.7,-0.0,-18.7,0.0,-0.1,-89.4,27.8,-89.4,-28.1,-89.4,-23.9,-132.4,61.6,-51.8,30.8,-33.4,-60.8,-50.9,-88.6,-73.6,-13.6,50.8,-2.4,99.8,10.5,52.6,35.0,96.6],[0.0,0.0,18.7,-0.2,-18.7,0.2,-1.1,-89.4,26.9,-89.7,-29.0,-89.1,-24.9,-132.3,62.2,-53.5,31.7,-34.5,-63.4,-52.0,-90.7,-75.2,-16.6,48.5,-13.9,98.7,13.7,50.9,40.9,93.3],[0.0,0.0,18.7,-0.5,-18.7,0.5,-2.4,-89.4,25.5,-90.1,-30.4,-88.6,-26.2,-132.3,61.3,-54.4,31.0,-35.2,-65.3,-52.0,-92.4,-75.4,-17.7,47.4,-23.7,97.4,14.8,50.5,42.8,92.3],[0.0,0.0,18.7,-0.8,-18.7,0.8,-3.8,-89.3,24.2,-90.5,-31.7,-88.1,-27.6,-132.3,59.4,-54.3,29.0,-35.3,-66.1,-51.0,-93.4,-74.3,-16.7,47.9,-31.0,96.1,13.8,51.5,40.9,93.8],[0.0,0.0,18.7,-1.0,-18.7,1.0,-4.8,-89.3,23.2,-90.8,-32.7,-87.8,-28.6,-132.2,56.9,-53.1,26.1,-34.7,-65.5,-49.3,-93.2,-72.0,-13.6,49.8,-35.1,95.3,10.6,53.6,35.0,97.5],[0.0,0.0,18.7,-1.1,-18.7,1.1,-5.1,-89.3,22.8,-90.9,-33.0,-87.7,-28.9,-132.2,54.0,-51.0,22.6,-33.6,-63.2,-47.1,-91.6,-68.9,-8.4,52.7,-31.1,97.6,5.2,56.3,29.6,100.3],[0.0,0.0,18.7,-1.0,-18.7,1.0,-4.8,-89.3,23.2,-90.8,-32.7,-87.8,-28.6,-132.2,50.7,-48.4,18.7,-32.3,-59.2,-44.7,-88.5,-65.3,-1.3,55.8,-18.1,103.2,-2.0,58.8,26.1,100.5],[0.0,0.0,18.7,-0.8,-18.7,0.8,-3.8,-89.3,24.2,-90.5,-31.7,-88.1,-27.6,-132.3,47.3,-45.5,14.5,-31.0,-53.7,-42.6,-84.0,-61.8,7.4,58.3,-2.1,107.7,-10.8,60.5,19.1,100.9]],"bob":[-0.0,-0.21,-0.8,-1.6,-2.4,-2.99,-3.2,-2.99,-2.4,-1.6,-0.8,-0.21,-0.0,-0.21,-0.8,-1.6,-2.4,-2.99,-3.2,-2.99,-2.4,-1.6,-0.8,-0.21]}}};
+const PT = DATA.points, CLIPS = DATA.clips, RIG = DATA.rig, TUCK = DATA.tuck;
+const NP = PT.length, IDX = {};
+PT.forEach((name, i) => IDX[name] = i);
+
+/* ---------------------------------------------------------------
+   1. A pose is 15 measured joint positions
+      Every number below came off a detection: hip-centred x/y pairs in
+      game pixels, already scaled by build_game.py so the subject stands
+      the right height in this arena. There is no rig here and nothing is
+      solved at runtime — the shape on screen is the shape the model saw,
+      foreshortening and all. `root` carries how far the hips travelled.
+   --------------------------------------------------------------- */
+const lerp = (a,b,t) => a + (b-a)*t;
+const clamp = (v,lo,hi) => v < lo ? lo : v > hi ? hi : v;
+
+function newPose(){ return { pts:new Float64Array(NP*2), bob:0, root:0 }; }
+
+/* Hip-relative pose -> named joints, hips dropped at world y `oy`. x stays
+   local: facing is a canvas flip, see toWorld() and drawFigure(). */
+function place(pose, oy){
+  const j = {}, a = pose.pts;
+  for(let i = 0; i < NP; i++) j[PT[i]] = { x:a[2*i], y:oy + a[2*i+1] };
+  return j;
+}
+
+/* ---------------------------------------------------------------
+   2. Clip sampling
+   --------------------------------------------------------------- */
+function clipDur(c){ return c.frames.length / c.fps; }
+
+/* Float frame index at time t, honouring the clip's loop mode. */
+function frameIndex(c, t){
+  const n = c.frames.length;
+  let f = t * c.fps;
+  if(c.pingpong){
+    const span = 2*(n-1);
+    f = ((f % span) + span) % span;
+    if(f > n-1) f = span - f;                 // reflect: the loop has no seam
+  } else if(c.loop){
+    f = ((f % n) + n) % n;
+  } else {
+    f = clamp(f, 0, n-1);
+  }
+  return f;
+}
+
+function samplePose(c, t, out){
+  const n = c.frames.length, f = frameIndex(c, t);
+  const i0 = Math.floor(f);
+  const i1 = c.loop ? (i0+1) % n : Math.min(i0+1, n-1);
+  const u = f - i0, a = c.frames[i0], b = c.frames[i1];
+  out = out || newPose();
+  for(let k = 0; k < NP*2; k++) out.pts[k] = lerp(a[k], b[k], u);
+  out.bob  = c.bob  ? lerp(c.bob[i0],  c.bob[i1],  u) : 0;
+  out.root = c.root ? lerp(c.root[i0], c.root[i1], u) : 0;
+  return out;
+}
+function copyPose(p, out){
+  out = out || newPose();
+  out.pts.set(p.pts); out.bob = p.bob; out.root = p.root;
+  return out;
+}
+function blendPose(a, b, t, out){
+  out = out || newPose();
+  for(let k = 0; k < NP*2; k++) out.pts[k] = lerp(a.pts[k], b.pts[k], t);
+  out.bob = lerp(a.bob, b.bob, t);
+  out.root = lerp(a.root, b.root, t);
+  return out;
+}
+
+/* ---------------------------------------------------------------
+   3. World
+   --------------------------------------------------------------- */
+const W = 960, H = 540, GROUND = 466;
+const STROKE = RIG.stroke;          // line weights only — joints arrive pre-scaled
+const ACCEL = 1500, MAXV = 275, FRICTION = 9, AIR_FRICTION = 1.4;
+const GRAV = 2100, JUMPV = -760;
+const STRIDE = 132;                 // px of travel per walk cycle — kills foot slide
+const FADE = 0.10;                  // state cross-fade, seconds
+const LUNGE_COOLDOWN = 0.18;
+const ROUND = 60;
+const FOOT_R = 40, HAND_R = 32;
+
+const LUNGE_DUR = clipDur(CLIPS.lunge);
+const ACTIVE_T0 = CLIPS.lunge.active[0] / CLIPS.lunge.fps;
+const ACTIVE_T1 = CLIPS.lunge.active[1] / CLIPS.lunge.fps;
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let dpr = 1, viewScale = 1;
+function fit(){
+  const r = cv.getBoundingClientRect();
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  viewScale = (r.width || W) / W;
+  cv.width  = Math.max(1, Math.round(W * viewScale * dpr));
+  cv.height = Math.max(1, Math.round(H * viewScale * dpr));
+  cv.style.height = (H * viewScale) + 'px';
+}
+new ResizeObserver(fit).observe(cv);
+fit();
+
+let game, keys = new Set(), paused = false, over = false, started = false;
+let best = 0;
+
+function reset(){
+  game = {
+    p: { x: W*0.5, y: GROUND-150, vx:0, vy:0, dir:1, grounded:true,
+         state:'idle', t:0, walkPhase:0, cool:0, hits:new Set(),
+         pose:null, rootAnchorX: W*0.5 },
+    fade: { from:null, t:1 },
+    targets: [], parts: [], pops: [],
+    score: 0, combo: 0, time: ROUND, spawn: 0.6, spawned: 0, hits: 0, misses: 0
+  };
+  over = false; started = false; paused = false;
+}
+reset();
+
+/* --- pose for the current state ------------------------------------- */
+const scratch = newPose(), poseBuf = newPose();
+function statePose(p, out){
+  if(p.state === 'lunge')       return samplePose(CLIPS.lunge, p.t, out);
+  if(p.state === 'walk')        return samplePose(CLIPS.walk, p.walkPhase * clipDur(CLIPS.walk), out);
+  if(p.state === 'jump'){
+    const base = samplePose(CLIPS.idle, p.t, out);
+    /* One emitted tuck pose — knees up, arms up — lerped in by how close the
+       jump is to its apex, where |vy| is small. */
+    const k = clamp(1 - Math.abs(p.vy)/Math.abs(JUMPV), 0.3, 1);
+    for(let i = 0; i < NP*2; i++) base.pts[i] = lerp(base.pts[i], TUCK[i], k);
+    base.bob = 0; base.root = 0;
+    return base;
+  }
+  return samplePose(CLIPS.idle, p.t, out);
+}
+
+function setState(s){
+  const p = game.p;
+  if(p.state === s) return;
+  game.fade.from = copyPose(p.pose || statePose(p, newPose()));
+  game.fade.t = 0;
+  p.state = s;
+  p.t = 0;
+  if(s === 'lunge'){ p.hits.clear(); p.rootAnchorX = p.x; }
+}
+
+/* Hip-to-lowest-foot distance for a pose: the figure stands on its feet
+   rather than on an arbitrary baseline, so the lunge's drop is free. With
+   measured shapes this lands within ~13 px of the hip height the video
+   itself recorded, all the way through the move. */
+function stanceOffset(pose){
+  return Math.max(pose.pts[IDX.anL*2+1], pose.pts[IDX.anR*2+1]);
+}
+/* Local rig x -> world x. The clips face -x (that is the direction the
+   subject lunges in the video), so facing right is a canvas flip. */
+function toWorld(pt, p){ return { x: p.x + (p.dir === 1 ? -pt.x : pt.x), y: pt.y }; }
+
+/* ---------------------------------------------------------------
+   4. Simulation
+   --------------------------------------------------------------- */
+function update(dt){
+  const p = game.p;
+  p.cool = Math.max(0, p.cool - dt);
+  p.t += dt;
+  if(game.fade.t < 1) game.fade.t = Math.min(1, game.fade.t + dt/FADE);
+
+  const left  = keys.has('ArrowLeft')  || keys.has('KeyA');
+  const right = keys.has('ArrowRight') || keys.has('KeyD');
+  const locked = p.state === 'lunge';          // no steering mid-lunge
+
+  let ax = 0;
+  if(!locked){ if(left) ax -= ACCEL; if(right) ax += ACCEL; }
+  if(ax !== 0) p.dir = ax > 0 ? 1 : -1;
+  p.vx += ax*dt;
+  if(ax === 0) p.vx -= p.vx * Math.min(1, (p.grounded ? FRICTION : AIR_FRICTION) * dt);
+  if(locked)   p.vx -= p.vx * Math.min(1, 14 * dt);
+  p.vx = clamp(p.vx, -MAXV, MAXV);
+  p.x = clamp(p.x + p.vx*dt, 60, W-60);
+
+  if(!p.grounded){ p.vy += GRAV*dt; p.y += p.vy*dt; }
+
+  if(p.state === 'walk' || (p.state === 'idle' && Math.abs(p.vx) > 4))
+    p.walkPhase += (Math.abs(p.vx)/STRIDE) * dt;
+
+  // state machine
+  if(p.state === 'lunge'){
+    if(p.t >= LUNGE_DUR){ p.cool = LUNGE_COOLDOWN; setState(p.grounded ? 'idle' : 'jump'); }
+  } else if(!p.grounded){
+    if(p.state !== 'jump') setState('jump');
+  } else {
+    setState(Math.abs(p.vx) > 18 ? 'walk' : 'idle');
+  }
+
+  // pose, then let the feet decide where the hips sit
+  const raw = statePose(p, scratch);
+  p.pose = game.fade.t < 1 ? blendPose(game.fade.from, raw, game.fade.t, poseBuf)
+                           : copyPose(raw, poseBuf);
+  /* The lunge drives its own horizontal travel: `root` is how far the hips
+     moved on video, in game px, so the step-out covers real ground instead of
+     happening on the spot. The clips face -x, so facing right flips the sign. */
+  if(p.state === 'lunge')
+    p.x = clamp(p.rootAnchorX + (p.dir === 1 ? -p.pose.root : p.pose.root), 60, W-60);
+  const stance = stanceOffset(p.pose);
+  if(p.grounded){
+    p.y = GROUND - stance + (p.pose.bob || 0);
+  } else if(p.vy >= 0 && p.y + stance >= GROUND){
+    p.y = GROUND - stance; p.vy = 0; p.grounded = true;
+    burst(p.x, GROUND, 10, '#4fd1c5', 0.5);
+    if(p.state === 'jump') setState(Math.abs(p.vx) > 18 ? 'walk' : 'idle');
+  }
+
+  if(started && !over){
+    game.time -= dt;
+    if(game.time <= 0){
+      game.time = 0; over = true;
+      best = Math.max(best, game.score);
+      try{ localStorage.setItem('lungeArenaBest', String(best)); }catch(e){}
+    }
+  }
+
+  updateTargets(dt);
+  if(p.state === 'lunge' && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1) strike();
+
+  for(let i = game.parts.length-1; i >= 0; i--){
+    const q = game.parts[i];
+    q.vy += 900*dt; q.x += q.vx*dt; q.y += q.vy*dt; q.life -= dt;
+    if(q.life <= 0) game.parts.splice(i,1);
+  }
+  for(let i = game.pops.length-1; i >= 0; i--){
+    const q = game.pops[i]; q.y -= 34*dt; q.life -= dt;
+    if(q.life <= 0) game.pops.splice(i,1);
+  }
+}
+
+function updateTargets(dt){
+  if(!over && started){
+    game.spawn -= dt;
+    if(game.spawn <= 0){
+      spawnTarget();
+      const heat = 1 - clamp(game.time/ROUND, 0, 1);       // slowly busier
+      game.spawn = lerp(1.35, 0.62, heat) * (0.8 + Math.random()*0.5);
+    }
+  }
+  for(let i = game.targets.length-1; i >= 0; i--){
+    const t = game.targets[i];
+    t.x += t.vx*dt; t.phase += dt*t.wob;
+    t.y = t.y0 + Math.sin(t.phase)*t.amp;
+    if(t.x < -60 || t.x > W+60){
+      game.targets.splice(i,1);
+      if(!over){ game.misses++; if(game.combo > 1) pop(clamp(t.x,40,W-40), t.y0, 'combo lost', '#e2574c'); game.combo = 0; }
+    }
+  }
+}
+
+function spawnTarget(){
+  const fromLeft = Math.random() < 0.5;
+  const y0 = lerp(GROUND-38, GROUND-232, Math.random());
+  const speed = lerp(58, 132, Math.random());
+  game.targets.push({
+    x: fromLeft ? -40 : W+40, y: y0, y0,
+    vx: fromLeft ? speed : -speed,
+    r: lerp(15, 21, Math.random()),
+    phase: Math.random()*6.28, wob: lerp(0.9, 2.1, Math.random()), amp: lerp(6, 26, Math.random()),
+    id: game.spawned++
+  });
+}
+
+/* Hitbox comes off the measured pose: whichever ankle and wrist are furthest
+   forward for the current facing, live only inside the clip's strike window. */
+function strike(){
+  const p = game.p;
+  const j = place(p.pose, p.y);
+  const foot = pickLead(j.anL, j.anR, p), hand = pickLead(j.wrL, j.wrR, p);
+  for(const t of game.targets){
+    if(p.hits.has(t.id)) continue;
+    if(hit(foot, t, FOOT_R) || hit(hand, t, HAND_R)){
+      p.hits.add(t.id);
+      t.dead = true;
+      game.combo++; game.hits++;
+      const mult = Math.min(game.combo, 9);
+      game.score += 100*mult;
+      burst(t.x, t.y, 22, '#f2b544', 0.75);
+      pop(t.x, t.y, '+' + (100*mult) + (mult > 1 ? '  x' + mult : ''), '#f2b544');
+    }
+  }
+  game.targets = game.targets.filter(t => !t.dead);
+}
+function pickLead(a, b, p){
+  const wa = toWorld(a, p), wb = toWorld(b, p);
+  return (p.dir*wa.x > p.dir*wb.x) ? wa : wb;
+}
+function hit(pt, t, r){
+  const dx = pt.x - t.x, dy = pt.y - t.y;
+  return dx*dx + dy*dy <= (r + t.r)*(r + t.r);
+}
+function burst(x, y, n, col, life){
+  for(let i = 0; i < n; i++){
+    const a = Math.random()*6.283, sp = lerp(40, 300, Math.random());
+    game.parts.push({x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - 60, life:life*(0.5+Math.random()), col});
+  }
+}
+function pop(x, y, text, col){ game.pops.push({x, y, text, col, life:0.9}); }
+
+/* ---------------------------------------------------------------
+   5. Drawing
+   --------------------------------------------------------------- */
+function draw(){
+  ctx.setTransform(viewScale*dpr, 0, 0, viewScale*dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0d1116'; ctx.fillRect(0, 0, W, H);
+
+  // grid, matching the scrubber's stage
+  ctx.strokeStyle = '#1b222a'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for(let x = 0; x <= W; x += 60){ ctx.moveTo(x+0.5, 0); ctx.lineTo(x+0.5, H); }
+  for(let y = 0; y <= H; y += 60){ ctx.moveTo(0, y+0.5); ctx.lineTo(W, y+0.5); }
+  ctx.stroke();
+
+  // ground
+  ctx.strokeStyle = '#2f6b66'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, GROUND+0.5); ctx.lineTo(W, GROUND+0.5); ctx.stroke();
+  ctx.fillStyle = 'rgba(79,209,197,0.045)'; ctx.fillRect(0, GROUND+1, W, H-GROUND-1);
+
+  const p = game.p;
+  const active = p.state === 'lunge' && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1;
+
+  for(const t of game.targets) drawTarget(t);
+  drawFigure(p, active);
+
+  for(const q of game.parts){
+    ctx.globalAlpha = clamp(q.life, 0, 1);
+    ctx.fillStyle = q.col;
+    ctx.fillRect(q.x-1.6, q.y-1.6, 3.2, 3.2);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center'; ctx.font = "500 15px 'IBM Plex Mono', monospace";
+  for(const q of game.pops){
+    ctx.globalAlpha = clamp(q.life/0.9, 0, 1);
+    ctx.fillStyle = q.col;
+    ctx.fillText(q.text, q.x, q.y);
+  }
+  ctx.globalAlpha = 1;
+
+  drawOverlays();
+}
+
+function drawTarget(t){
+  ctx.save();
+  ctx.strokeStyle = '#f2b544'; ctx.fillStyle = 'rgba(242,181,68,0.10)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, 6.2832); ctx.fill(); ctx.stroke();
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath(); ctx.arc(t.x, t.y, t.r*0.42, 0, 6.2832); ctx.stroke();
+  ctx.globalAlpha = 0.22;
+  ctx.beginPath(); ctx.moveTo(t.x - Math.sign(t.vx)*t.r, t.y); ctx.lineTo(t.x - Math.sign(t.vx)*(t.r+26), t.y); ctx.stroke();
+  ctx.restore();
+}
+
+function drawFigure(p, active){
+  if(!p.pose) return;
+  const j = place(p.pose, p.y);
+  const s = STROKE;
+
+  // shadow, sized by height off the ground
+  const lowest = Math.max(j.anL.y, j.anR.y);
+  const air = clamp(1 - (GROUND - lowest)/220, 0.18, 1);
+  ctx.save();
+  ctx.globalAlpha = 0.28*air; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(p.x, GROUND+3, 42*air, 6*air, 0, 0, 6.2832); ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(p.x, 0);
+  ctx.scale(p.dir === 1 ? -1 : 1, 1);      // facing is a canvas flip, nothing else
+
+  const line = (a,b,w) => { ctx.lineWidth = w*s; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); };
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#4fd1c5';
+
+  line(j.hipL, j.hipR, 5); line(j.hipC, j.shC, 7); line(j.shL, j.shR, 5);
+  line(j.shL, j.elL, 5); line(j.elL, j.wrL, 4);
+  line(j.shR, j.elR, 5); line(j.elR, j.wrR, 4);
+  line(j.hipL, j.knL, 6); line(j.knL, j.anL, 5);
+  line(j.hipR, j.knR, 6); line(j.knR, j.anR, 5);
+
+  ctx.lineWidth = 5*s;
+  ctx.beginPath(); ctx.arc(j.headC.x, j.headC.y, RIG.headR, 0, 6.2832); ctx.stroke();
+  line(j.shC, j.headC, 4);
+
+  ctx.fillStyle = '#1d2938';
+  for(const k of ['elL','elR','wrL','wrR','knL','knR','anL','anR','shC','hipC']){
+    ctx.beginPath(); ctx.arc(j[k].x, j[k].y, 3.2*s, 0, 6.2832); ctx.fill();
+    ctx.lineWidth = 2*s; ctx.stroke();
+  }
+  ctx.restore();
+
+  if(active){
+    const foot = pickLead(j.anL, j.anR, p), hand = pickLead(j.wrL, j.wrR, p);
+    ctx.save();
+    ctx.strokeStyle = '#f2b544'; ctx.fillStyle = 'rgba(242,181,68,0.10)'; ctx.lineWidth = 2;
+    for(const [pt, r] of [[foot, FOOT_R], [hand, HAND_R]]){
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, 6.2832); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawOverlays(){
+  const msg = over ? 'ROUND OVER'
+            : paused ? 'PAUSED'
+            : !started ? 'PRESS ANY KEY' : null;
+  if(!msg) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(13,17,22,0.78)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = over ? '#f2b544' : '#e8edf1';
+  ctx.font = "700 38px 'Sora', system-ui, sans-serif";
+  ctx.fillText(msg, W/2, H/2 - 12);
+  ctx.font = "400 15px 'IBM Plex Mono', monospace";
+  ctx.fillStyle = '#8d99a6';
+  const sub = over ? game.score + ' points  ' + game.hits + ' hits  ' + game.misses + ' missed   —   R to play again'
+            : paused ? 'P to resume'
+            : 'move with the arrow keys, jump with space, lunge with F';
+  ctx.fillText(sub, W/2, H/2 + 24);
+  ctx.restore();
+}
+
+/* ---------------------------------------------------------------
+   6. HUD
+   --------------------------------------------------------------- */
+const el = id => document.getElementById(id);
+const hud = { score:el('statScore'), combo:el('statCombo'), time:el('statTime'), best:el('statBest'),
+              state:el('roState'), frame:el('roFrame'), strike:el('roStrike') };
+let hudCache = {};
+function setText(node, key, value){
+  if(hudCache[key] === value) return;
+  hudCache[key] = value; node.textContent = value;
+}
+function drawHud(){
+  const p = game.p;
+  setText(hud.score, 'score', String(game.score));
+  setText(hud.combo, 'combo', '×' + Math.max(1, Math.min(game.combo, 9)));
+  setText(hud.time,  'time',  game.time.toFixed(1));
+  setText(hud.best,  'best',  String(best));
+  hud.time.classList.toggle('low', game.time <= 10);
+  setText(hud.state, 'state', p.state);
+  const inLunge = p.state === 'lunge';
+  const c = CLIPS.lunge;
+  setText(hud.frame, 'frame', inLunge
+    ? (Math.floor(frameIndex(c, p.t)) + 1) + '/' + c.frames.length
+    : '—');
+  const active = inLunge && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1;
+  hud.strike.classList.toggle('on', active);
+  for(const row of clipRows) row.el.classList.toggle('active', row.key === p.state);
+}
+
+const clipRows = [];
+(function buildClipList(){
+  const list = el('clipList');
+  let total = 0;
+  for(const key of ['idle','walk','lunge']){
+    const c = CLIPS[key];
+    total += c.frames.length;
+    const row = document.createElement('div');
+    row.className = 'clip-row';
+    const measured = c.source !== 'procedural';
+    row.innerHTML =
+      '<div class="clip-name"><span class="dot"></span>' + key +
+        ' <span class="badge ' + (measured ? 'meas' : 'proc') + '">' + (measured ? 'measured' : 'procedural') + '</span></div>' +
+      '<div class="clip-frames">' + c.frames.length + ' fr &middot; ' + clipDur(c).toFixed(2) + 's</div>' +
+      '<div class="clip-src">' + c.note + '</div>';
+    list.appendChild(row);
+    clipRows.push({key, el:row});
+  }
+  el('clipCount').textContent = total + ' frames total';
+  el('foot').innerHTML =
+    'Built by <code>build_game.py</code> from <code>lunge_all_frames.json</code> &mdash; ' +
+    DATA.meta.detected + ' detections across ' + DATA.meta.n_frames + ' source frames at ' +
+    DATA.meta.fps.toFixed(2) + ' fps. Joint positions are the measured ones, scaled by ' +
+    DATA.meta.scale.toFixed(4) + '; drawing ported from <code>pose-stick-figure-rfdetr.html</code>. ' +
+    'Self-contained: the only external request is the Google Fonts stylesheet.';
+})();
+
+/* ---------------------------------------------------------------
+   7. Input + loop
+   --------------------------------------------------------------- */
+const HELD = new Set(['ArrowLeft','ArrowRight','KeyA','KeyD','Space','ArrowUp','ArrowDown']);
+addEventListener('keydown', e => {
+  if(HELD.has(e.code)) e.preventDefault();
+  if(e.repeat) return;
+  if(!started && !over){ started = true; }
+  keys.add(e.code);
+  if(e.code === 'KeyR'){ const b = best; reset(); best = b; return; }
+  if(e.code === 'KeyP'){ if(!over) paused = !paused; return; }
+  if(over) return;
+  if(paused) return;
+  const p = game.p;
+  if((e.code === 'Space' || e.code === 'ArrowUp') && p.grounded && p.state !== 'lunge'){
+    p.vy = JUMPV; p.grounded = false; setState('jump');
+    burst(p.x, GROUND, 8, '#4fd1c5', 0.35);
+  }
+  if(e.code === 'KeyF' && p.state !== 'lunge' && p.cool <= 0){ setState('lunge'); }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => { keys.clear(); if(!over) paused = true; });
+
+try{ best = parseInt(localStorage.getItem('lungeArenaBest') || '0', 10) || 0; }catch(e){}
+
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - last)/1000);
+  last = now;
+  if(!paused && !over) update(dt);
+  draw();
+  drawHud();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
