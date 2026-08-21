@@ -35,9 +35,9 @@ quickstart rather than from here.
 ## Windows quickstart (GPU)
 
 Written against the RTX 4070 Ti box, but nothing in it is specific to that card. Run everything
-from the repo root — several scripts default to
-relative paths — and call `.venv\Scripts\python` directly rather than activating the venv;
-that works identically in `cmd` and PowerShell.
+from the repo root — several scripts default to relative paths — and call
+`.venv\Scripts\python` directly rather than activating the venv; that works identically in
+`cmd` and PowerShell.
 
 **1. Prerequisites.** An NVIDIA driver (`nvidia-smi` should print the card — the CUDA Toolkit is
 *not* needed, the torch wheels bundle their own), Python 3.12 (`py -0` lists what you have;
