@@ -502,7 +502,9 @@ async function checkBackend(){
     const r = await fetch("/health");
     if(!r.ok) throw new Error(String(r.status));
     const j = await r.json();
-    backendEl.textContent = `${j.model} @ ${j.resolution}px · ${j.device}`;
+    const prec = j.half ? "fp16" : "fp32";
+    backendEl.textContent = `${j.model} @ ${j.resolution}px · ${j.device} ${prec}`
+      + (j.gpu ? ` · ${j.gpu}` : "");
     return true;
   }catch(e){
     backendEl.textContent = "backend unreachable";

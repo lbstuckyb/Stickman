@@ -1,0 +1,3 @@
+# Keep LF in the working tree on every platform: test_retarget.mjs and test_mirror.mjs
+# slice the HTML on literal "\n" markers, so a CRLF checkout breaks both.
+* text=auto eol=lf

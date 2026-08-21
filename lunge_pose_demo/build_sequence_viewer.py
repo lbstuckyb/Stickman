@@ -25,7 +25,8 @@ import cv2
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # repo root, for rfdetr_pose
 
-from rfdetr_pose import KEYPOINT_NAMES, SKELETON, PoseModel  # noqa: E402
+from rfdetr_pose import (KEYPOINT_NAMES, SKELETON, PoseModel,  # noqa: E402
+                         add_device_args, announce_device)
 
 
 def build_html(data_json: str) -> str:
@@ -370,6 +371,7 @@ def main() -> int:
     ap.add_argument("--resolution", type=int, default=384)
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--label", default=None, help="output filename prefix (default: video stem)")
+    add_device_args(ap)
     args = ap.parse_args()
 
     video_path = Path(args.video)
@@ -383,7 +385,9 @@ def main() -> int:
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"video: {w}x{h} @ {fps:.2f}fps, ~{n_frames} frames")
 
-    model = PoseModel(resolution=args.resolution)
+    announce_device(args.device)
+    model = PoseModel(resolution=args.resolution, device=args.device,
+                      half=args.half, optimize=args.optimize)
     print(f"model: RFDETRKeypointPreview @ {model.resolution}px on {model.device}")
 
     raw_frames = []
@@ -409,7 +413,7 @@ def main() -> int:
         "keypoint_names": KEYPOINT_NAMES, "skeleton": SKELETON, "frames": raw_frames,
     }
     raw_path = out_dir / f"{label}_all_frames.json"
-    with open(raw_path, "w") as f:
+    with open(raw_path, "w", encoding="utf-8") as f:
         json.dump(raw_out, f)
     print(f"wrote {raw_path}")
 
@@ -445,7 +449,7 @@ def main() -> int:
     }
 
     out_html = out_dir / f"{label}_keypoints_scrubber.html"
-    with open(out_html, "w") as f:
+    with open(out_html, "w", encoding="utf-8") as f:
         f.write(build_html(json.dumps(data, separators=(",", ":"))))
     print(f"wrote {out_html}")
     return 0

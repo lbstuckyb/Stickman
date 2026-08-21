@@ -16,6 +16,7 @@ server; the page keeps the camera, the retargeting, and the rig.
 | `rfdetr_pose.py` | model wrapper: load once, predict, normalize to JSON |
 | `serve_rfdetr.py` | localhost server — serves the page, answers `POST /keypoints` |
 | `test_rfdetr_keypoints.py` | smoke test + latency benchmark, writes an annotated image |
+| `check_gpu.py` | torch-only GPU check — run it first on a new machine, before anything loads the model |
 | `test_retarget.mjs` | runs the page's own `readAngles()`/`solve()` over a saved payload (`payload.json`) |
 | `test_mirror.mjs` | guards the left/right mirroring — raise an arm, the rig raises the matching one |
 | `lunge_pose_demo/` | standalone HTML viewers of raw keypoint output (single frame + full-clip scrubber) — see its own README |
@@ -28,6 +29,47 @@ python3 -m venv .venv
 ```
 
 The 156 MB checkpoint downloads itself on first use, to `~/.roboflow/models/`.
+
+### Windows, with a GPU
+
+Install order matters. On Windows, pip's default index serves a **CPU-only** torch, and that
+wheel imports and runs perfectly well — just thirty times slower, with nothing in the output to
+say why. So install torch from the CUDA index *first*, then let `rfdetr` install on top of it:
+
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129
+.venv\Scripts\python -m pip install rfdetr supervision opencv-python-headless
+.venv\Scripts\python check_gpu.py
+```
+
+The `cu129` tag moves — take the current one from
+[pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/). The check that
+matters is `torch.version.cuda is not None`, which is exactly what `check_gpu.py` reports; it
+also times an FP32 and an FP16 matmul so you can see the tensor cores actually working. Don't
+copy a `.venv` across machines — `pyvenv.cfg` hardcodes the interpreter path.
+
+Every command below is written for POSIX; on Windows swap `.venv/bin/python` for
+`.venv\Scripts\python`.
+
+### Device and precision flags
+
+Every entry point (`test_rfdetr_keypoints.py`, `serve_rfdetr.py`, `lunge_pose_demo/serve_game.py`,
+`lunge_pose_demo/build_frame_viewer.py`, `lunge_pose_demo/build_sequence_viewer.py`) takes the
+same device flags:
+
+| flag | default | what it does |
+| --- | --- | --- |
+| `--device` | `auto` | `auto`, `cpu`, `cuda`, or `cuda:N`. `auto` picks CUDA when it's there |
+| `--half` / `--no-half` | on under CUDA | FP16 tensor cores. Ignored on CPU, where FP16 is slower |
+| `--optimize` | off | also `torch.jit.trace` the model — slow first call, faster after |
+
+`--half` is where most of the GPU win is: it routes the model through rfdetr's
+`inference(dtype=torch.float16)`, which is what Roboflow's own "~8x on a T4" note refers to.
+Under CUDA the wrapper also turns on `cudnn.benchmark` (the input shape is fixed at startup) and
+TF32 matmuls. `--optimize` is `torch.jit.trace`, **not** `torch.compile`, so it needs no C++
+toolchain on Windows. Every startup banner and every `/health` response reports the device, the
+precision and the GPU name, so a silent CPU fallback is visible without benchmarking for it.
 
 ## Test
 
@@ -88,3 +130,26 @@ For contrast, the blog quotes 9.8 ms at 576×576 on a T4 with TensorRT FP16, at 
 AP on COCO val2017. The gap here is entirely CPU-vs-accelerator: same weights, no TensorRT,
 no FP16. On CPU the live demo runs at roughly 2–3 fps, which the One Euro filter smooths into
 something watchable but not real time.
+
+(Those counts were taken with the package versions of the day; a later `rfdetr` finds 2 people
+in `sample_people.jpg` at 288px, not 3. The latencies still hold.)
+
+## Measured on the RTX 4070 Ti
+
+To fill in from the Windows box — `--runs 20` at each resolution, FP16 and FP32:
+
+| resolution | CPU | GPU FP32 | GPU FP16 | GPU FP16 + `--optimize` |
+| --- | --- | --- | --- | --- |
+| 288 | 322 ms | | | |
+| 384 | 408 ms | | | |
+| 576 | 880 ms | | | |
+
+```bash
+.venv\Scripts\python check_gpu.py
+.venv\Scripts\python test_rfdetr_keypoints.py sample_people.jpg --runs 20 --resolution 384
+.venv\Scripts\python test_rfdetr_keypoints.py sample_people.jpg --runs 20 --resolution 384 --no-half --out gpu_fp32.jpg
+```
+
+`--out` also names the JSON beside it, so an FP16 and an FP32 run can be diffed rather than
+overwriting each other. Expect them to agree to about a pixel; the per-joint covariance
+ellipses in the annotated JPEG are the output most likely to look wrong if FP16 misbehaves.

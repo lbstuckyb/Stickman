@@ -1917,7 +1917,7 @@ def main() -> int:
                          "CLIPS.custom, so it plays with no server and no browser storage")
     args = ap.parse_args()
 
-    src = json.loads(Path(args.data).read_text())
+    src = json.loads(Path(args.data).read_text(encoding="utf-8"))
     frames = src["frames"]
     vid = src["video"]
     fps = vid["fps"]
@@ -2043,7 +2043,7 @@ def main() -> int:
     }
 
     if args.custom:
-        moves = json.loads(Path(args.custom).read_text())
+        moves = json.loads(Path(args.custom).read_text(encoding="utf-8"))
         current = moves.get("current")
         entry = moves.get("moves", {}).get(current) if current else None
         if entry is None:
@@ -2091,7 +2091,7 @@ def main() -> int:
 
     out = Path(args.out)
     payload = json.dumps(data, separators=(",", ":"))
-    out.write_text(build_html(payload))
+    out.write_text(build_html(payload), encoding="utf-8")
     print(f"wrote {out}  ({out.stat().st_size / 1024:.0f} KB, {len(payload) / 1024:.0f} KB of clip data)")
     return 0
 

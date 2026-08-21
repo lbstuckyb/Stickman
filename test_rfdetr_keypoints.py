@@ -14,11 +14,13 @@ import argparse
 import json
 import statistics
 import sys
+from pathlib import Path
 
 import cv2
 import numpy as np
 
-from rfdetr_pose import KEYPOINT_NAMES, SKELETON, PoseModel, covariance_ellipse
+from rfdetr_pose import (KEYPOINT_NAMES, SKELETON, PoseModel, add_device_args,
+                         announce_device, covariance_ellipse)
 
 TEAL = (197, 209, 79)      # BGR
 AMBER = (68, 181, 242)
@@ -63,7 +65,9 @@ def main() -> int:
     ap.add_argument("--resolution", type=int, default=None,
                     help="inference resolution; the preview checkpoint's default is 576")
     ap.add_argument("--out", default="rfdetr_keypoints_out.jpg")
+    add_device_args(ap)
     args = ap.parse_args()
+    out_json = Path(args.out).with_suffix(".json")   # so fp16/fp32 runs do not overwrite
 
     image = cv2.imread(args.image)
     if image is None:
@@ -73,8 +77,10 @@ def main() -> int:
     h, w = image.shape[:2]
     print(f"image      : {args.image} ({w}x{h})")
 
-    model = PoseModel(resolution=args.resolution)
-    print(f"model      : RFDETRKeypointPreview @ {model.resolution}px on {model.device}")
+    announce_device(args.device)
+    model = PoseModel(resolution=args.resolution, device=args.device,
+                      half=args.half, optimize=args.optimize)
+    print(f"model      : {model.summary()}")
     print(f"load       : {model.timing.load_s:.1f}s   warmup: {model.timing.warmup_s*1000:.0f}ms")
 
     kp, _ = model.predict(rgb, threshold=args.threshold)
@@ -116,7 +122,7 @@ def main() -> int:
           f"min {min(times):.0f}  max {max(times):.0f}  (n={args.runs}, {model.device})")
 
     payload = model.predict_payload(rgb, threshold=args.threshold, width=w, height=h)
-    with open("rfdetr_keypoints_out.json", "w") as f:
+    with open(out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     for p in payload["people"]:
         for k in p["keypoints"]:
@@ -125,7 +131,7 @@ def main() -> int:
                 break
 
     cv2.imwrite(args.out, annotate(image, kp))
-    print(f"wrote      : {args.out}, rfdetr_keypoints_out.json")
+    print(f"wrote      : {args.out}, {out_json}")
 
     if failures:
         print("\nFAIL:")

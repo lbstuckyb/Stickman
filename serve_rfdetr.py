@@ -24,7 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from rfdetr_pose import PoseModel
+from rfdetr_pose import PoseModel, add_device_args, announce_device
 
 ROOT = Path(__file__).parent
 PAGE = "pose-stick-figure-rfdetr.html"
@@ -61,6 +61,11 @@ class Handler(BaseHTTPRequestHandler):
                 "model": "RFDETRKeypointPreview",
                 "resolution": model.resolution,
                 "device": model.device,
+                "half": model.half,
+                "optimize": model.optimize,
+                "gpu": model.gpu,
+                "torch": model.report["torch"],
+                "torch_cuda_build": model.report["torch_cuda_build"],
                 "threshold": threshold,
             })
         return self._json(404, {"error": "not found"})
@@ -105,17 +110,18 @@ def main():
                          "(576 is the checkpoint default and most accurate; "
                          "384 or 288 trade accuracy for CPU frame rate)")
     ap.add_argument("--threshold", type=float, default=0.5)
-    ap.add_argument("--optimize", action="store_true",
-                    help="torch.compile the model — slow first call, faster afterwards")
+    add_device_args(ap)
     args = ap.parse_args()
 
     if args.resolution % 24:
         ap.error(f"--resolution must be divisible by 24 (got {args.resolution})")
 
     threshold = args.threshold
+    announce_device(args.device)
     print(f"loading RFDETRKeypointPreview @ {args.resolution}px ...")
-    model = PoseModel(resolution=args.resolution, optimize=args.optimize)
-    print(f"ready on {model.device} — load {model.timing.load_s:.1f}s, "
+    model = PoseModel(resolution=args.resolution, device=args.device,
+                      half=args.half, optimize=args.optimize)
+    print(f"ready      : {model.summary()} - load {model.timing.load_s:.1f}s, "
           f"warmup {model.timing.warmup_s*1000:.0f}ms")
     print(f"open http://{args.host}:{args.port}/")
 

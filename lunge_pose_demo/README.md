@@ -79,10 +79,22 @@ From the repo root, using the project's existing `.venv` (see `../README.md` for
 .venv/bin/python lunge_pose_demo/build_game.py
 ```
 
+On Windows use `.venv\Scripts\python` in place of `.venv/bin/python` (and `python` for
+`python3`); see `../README.md` for the CUDA install and the `--device` / `--half` flags, which
+the first two accept (`build_game.py` never touches the model).
+
 `build_frame_viewer.py` takes a few seconds. `build_sequence_viewer.py` re-runs inference on
-every frame — at the default 384px on CPU that's roughly 3.5 minutes for this clip (~0.8s/frame).
-Both accept `--threshold` and `--resolution`; `build_sequence_viewer.py` also takes `--label` to
-change the output filename prefix if you point it at a different video.
+every frame — at the default 384px on CPU that's roughly 3.5 minutes for this clip (~0.8s/frame);
+on a GPU with FP16 it is seconds. `--label` keeps a GPU re-run from clobbering the committed
+CPU output, so the two can be compared:
+
+```bash
+.venv/bin/python lunge_pose_demo/build_sequence_viewer.py lunge_pose_demo/lunge.webm --label lunge_gpu
+```
+
+If OpenCV opens the `.webm` but reports zero frames (its bundled FFmpeg has to decode VP9),
+transcode to mp4 first, or decode with the `av` package that is already in the venv.
+Both viewers also accept `--threshold` and `--resolution`.
 
 `build_game.py` runs in well under a second and needs nothing from the venv — plain `python3`
 works, since it only reads the JSON the sequence builder already wrote. Its clip windows are
@@ -116,9 +128,13 @@ cached in the browser, but recording a new one needs a local model to analyze it
 
 ```bash
 .venv/bin/python lunge_pose_demo/serve_game.py --resolution 384
+# Windows:  .venv\Scripts\python lunge_pose_demo\serve_game.py --resolution 384
 ```
 
-then open `http://127.0.0.1:8000/` and click **Record / upload a move**. Record up to 4 seconds
+The startup banner and `http://127.0.0.1:8000/health` both report which device and precision
+the model ended up on — on a GPU box expect `cuda` and `fp16`, and treat `cpu` as an install
+problem rather than a slow machine. Then open `http://127.0.0.1:8000/` and click
+**Record / upload a move**. Record up to 4 seconds
 from a webcam (with a live MediaPipe skeleton overlay — preview only, not what gets measured) or
 upload a video and pick a 4-second window from it. Each frame is sent to the same RF-DETR model,
 threshold and tracker the lunge itself was built from; the result is trimmed and previewed before

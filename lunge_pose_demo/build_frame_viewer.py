@@ -22,7 +22,8 @@ import cv2
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # repo root, for rfdetr_pose
 
-from rfdetr_pose import KEYPOINT_NAMES, SKELETON, PoseModel  # noqa: E402
+from rfdetr_pose import (KEYPOINT_NAMES, SKELETON, PoseModel,  # noqa: E402
+                         add_device_args, announce_device)
 from test_rfdetr_keypoints import annotate  # noqa: E402
 
 
@@ -267,6 +268,7 @@ def main() -> int:
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--resolution", type=int, default=None)
     ap.add_argument("--label", default=None, help="output filename prefix (default: image stem)")
+    add_device_args(ap)
     args = ap.parse_args()
 
     image_path = Path(args.image)
@@ -280,7 +282,9 @@ def main() -> int:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     h, w = bgr.shape[:2]
 
-    model = PoseModel(resolution=args.resolution)
+    announce_device(args.device)
+    model = PoseModel(resolution=args.resolution, device=args.device,
+                      half=args.half, optimize=args.optimize)
     kp, _ = model.predict(rgb, threshold=args.threshold)
     if len(kp) == 0:
         print("FAIL: no people detected")
@@ -291,7 +295,7 @@ def main() -> int:
 
     payload = model.predict_payload(rgb, threshold=args.threshold, width=w, height=h)
     out_json = out_dir / f"{label}_keypoints_out.json"
-    with open(out_json, "w") as f:
+    with open(out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
     best = max(payload["people"], key=lambda p: p["score"])
@@ -313,7 +317,7 @@ def main() -> int:
         "device": payload["device"],
     }
     out_html = out_dir / f"{label}_keypoints_viewer.html"
-    with open(out_html, "w") as f:
+    with open(out_html, "w", encoding="utf-8") as f:
         f.write(build_html(json.dumps(viewer_data)))
 
     print(f"wrote {out_jpg}")

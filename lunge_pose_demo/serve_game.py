@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-from rfdetr_pose import PoseModel  # noqa: E402
+from rfdetr_pose import PoseModel, add_device_args, announce_device  # noqa: E402
 import build_game as bg  # noqa: E402
 
 PAGE = "lunge_game.html"
@@ -61,7 +61,7 @@ def _load_lunge_rig():
     is close to the identity it should be.
     """
     data_path = HERE / "lunge_all_frames.json"
-    src = json.loads(data_path.read_text())
+    src = json.loads(data_path.read_text(encoding="utf-8"))
     frames, vid = src["frames"], src["video"]
     tracked = bg.track_subject(frames, vid["w"], vid["h"])
     pts = bg.smooth_points(bg.point_tracks(tracked), 3)
@@ -80,11 +80,11 @@ def _read_body(handler) -> bytes:
 def _load_moves() -> dict:
     if not MOVES_PATH.exists():
         return {"moves": {}, "current": None}
-    return json.loads(MOVES_PATH.read_text())
+    return json.loads(MOVES_PATH.read_text(encoding="utf-8"))
 
 
 def _save_moves(store: dict) -> None:
-    MOVES_PATH.write_text(json.dumps(store, separators=(",", ":")))
+    MOVES_PATH.write_text(json.dumps(store, separators=(",", ":")), encoding="utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,6 +116,11 @@ class Handler(BaseHTTPRequestHandler):
                 "model": "RFDETRKeypointPreview",
                 "resolution": model.resolution,
                 "device": model.device,
+                "half": model.half,
+                "optimize": model.optimize,
+                "gpu": model.gpu,
+                "torch": model.report["torch"],
+                "torch_cuda_build": model.report["torch_cuda_build"],
                 "threshold": threshold,
                 "rig": dst_rig,
                 "scale": dst_k,
@@ -236,8 +241,7 @@ def main():
                          "(576 is the checkpoint default and most accurate; "
                          "384 or 288 trade accuracy for CPU frame rate)")
     ap.add_argument("--threshold", type=float, default=0.5)
-    ap.add_argument("--optimize", action="store_true",
-                    help="torch.compile the model — slow first call, faster afterwards")
+    add_device_args(ap)
     args = ap.parse_args()
 
     if args.resolution % 24:
@@ -247,9 +251,11 @@ def main():
     dst_rig, dst_k, dst_fps = _load_lunge_rig()
     print(f"lunge rig loaded: height {dst_rig['height'] * dst_k:.0f}px, scale {dst_k:.4f}")
 
+    announce_device(args.device)
     print(f"loading RFDETRKeypointPreview @ {args.resolution}px ...")
-    model = PoseModel(resolution=args.resolution, optimize=args.optimize)
-    print(f"ready on {model.device} — load {model.timing.load_s:.1f}s, "
+    model = PoseModel(resolution=args.resolution, device=args.device,
+                      half=args.half, optimize=args.optimize)
+    print(f"ready      : {model.summary()} - load {model.timing.load_s:.1f}s, "
           f"warmup {model.timing.warmup_s*1000:.0f}ms")
     print(f"open http://{args.host}:{args.port}/")
 
