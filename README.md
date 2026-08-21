@@ -17,6 +17,7 @@ server; the page keeps the camera, the retargeting, and the rig.
 | `serve_rfdetr.py` | localhost server — serves the page, answers `POST /keypoints` |
 | `test_rfdetr_keypoints.py` | smoke test + latency benchmark, writes an annotated image |
 | `check_gpu.py` | torch-only GPU check — run it first on a new machine, before anything loads the model |
+| `requirements.txt` | the versions this was verified against; read its header before installing on Windows |
 | `test_retarget.mjs` | runs the page's own `readAngles()`/`solve()` over a saved payload (`payload.json`) |
 | `test_mirror.mjs` | guards the left/right mirroring — raise an arm, the rig raises the matching one |
 | `lunge_pose_demo/` | standalone HTML viewers of raw keypoint output (single frame + full-clip scrubber) — see its own README |
@@ -25,7 +26,7 @@ server; the page keeps the camera, the retargeting, and the rig.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install rfdetr supervision opencv-python-headless
+.venv/bin/pip install -r requirements.txt
 ```
 
 The 156 MB checkpoint downloads itself on first use, to `~/.roboflow/models/`. Commands below
@@ -57,13 +58,14 @@ git checkout measured-lunge-replay
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip
 .venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129
-.venv\Scripts\python -m pip install rfdetr supervision opencv-python-headless
+.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
 Torch has to come first, and from that index. Plain `pip install torch` on Windows resolves a
 **CPU-only** wheel that imports and runs perfectly well — just thirty times slower, with nothing
-in the output to say why — and `rfdetr` then sees its `torch>=2.2` requirement already satisfied
-and leaves it in place. The `cu129` tag moves; take the current one from
+in the output to say why. `requirements.txt` is no defence: it pins a version, not the index the
+wheel came from, and both `rfdetr` and the pin are satisfied either way. The `cu129` tag moves;
+take the current one from
 [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/), any cu12x/cu13x
 build supports Ada. Don't copy a `.venv` from another machine — `pyvenv.cfg` hardcodes the
 interpreter path.

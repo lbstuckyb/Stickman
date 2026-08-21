@@ -1,0 +1,29 @@
+# Versions this repo was last verified against (Linux, Python 3.12, August 2026).
+#
+#     pip install -r requirements.txt
+#
+# ON WINDOWS, INSTALL TORCH FIRST, FROM THE CUDA INDEX -- see the quickstart in
+# README.md. pip's default index serves a CPU-only torch on Windows, and this file
+# cannot tell the two apart: a CPU-only wheel satisfies `torch==2.13.0` just as well
+# as the CUDA one, imports fine, and runs thirty times slower.
+#
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129
+#     pip install -r requirements.txt
+#
+# If that exact torch build is not on the CUDA index for your platform, take the
+# newest one that is and relax the two pins below -- rfdetr only needs torch>=2.2.
+# `check_gpu.py` tells you which wheel you ended up with.
+#
+# Direct dependencies only. A full `pip freeze` of this venv would pin the Linux
+# nvidia-*-cu13 wheels, which do not exist on Windows.
+
+torch==2.13.0
+torchvision==0.28.0
+rfdetr==1.9.2
+supervision==0.30.0
+opencv-python-headless==5.0.0.93
+numpy==2.5.2
+
+# A hard dependency of rfdetr, pinned because its accepted range (>=5.1,<6) is wide
+# enough for a minor release to change model loading under us.
+transformers==5.15.0
