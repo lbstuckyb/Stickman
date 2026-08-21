@@ -219,6 +219,204 @@ def measure_rig(tracks, tracked, lo, hi):
 
 
 # --------------------------------------------------------------------------
+# 1b. Retargeting a recorded move onto the lunge subject's proportions
+# --------------------------------------------------------------------------
+
+def _percentile(vals, p):
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    idx = (p / 100) * (len(s) - 1)
+    lo, frac = int(math.floor(idx)), idx - int(math.floor(idx))
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] * (1 - frac) + s[hi] * frac
+
+
+def measure_rig_dynamic(tracks, tracked, lo, hi):
+    """Like measure_rig(), but a high percentile of each bone length instead of
+    the median.
+
+    measure_rig()'s medians assume a still window to measure from; a 4-second
+    action recording has no guaranteed still stretch, and the median of a bone
+    that spends most of the clip foreshortened would under-measure it. The
+    bone's true length is the extreme its projection reaches toward, so this
+    takes the 90th percentile over the whole window instead.
+    """
+    p90 = lambda *pairs: _percentile(
+        [v for a, b in pairs for v in _seg(tracks, a, b, lo, hi)], 90)
+    rig = {
+        "spine": p90(("hipC", "shC")),
+        "neck": p90(("shC", "headC")),
+        "thigh": p90(("hipL", "knL"), ("hipR", "knR")),
+        "shin": p90(("knL", "anL"), ("knR", "anR")),
+        "upperArm": p90(("shL", "elL"), ("shR", "elR")),
+        "forearm": p90(("elL", "wrL"), ("elR", "wrR")),
+        "pelvisHalf": p90(("hipL", "hipR")) / 2,
+        "shoulderHalf": p90(("shL", "shR")) / 2,
+    }
+    ears = [math.hypot(kp[L["earL"]]["x"] - kp[L["earR"]]["x"],
+                       kp[L["earL"]]["y"] - kp[L["earR"]]["y"])
+            for kp in tracked[lo:hi + 1]
+            if kp is not None and _ok(kp[L["earL"]]) and _ok(kp[L["earR"]])]
+    rig["headR"] = 0.7 * (_percentile(ears, 90) if ears else 0.6 * rig["neck"])
+    rig["height"] = rig["neck"] + rig["spine"] + rig["thigh"] + rig["shin"]
+    return rig
+
+
+# Walked outward from hipC. Each entry is (parent, child, bone-name-in-rig).
+_HIERARCHY = [
+    ("hipC", "hipL", "pelvisHalf"), ("hipC", "hipR", "pelvisHalf"),
+    ("hipC", "shC", "spine"),
+    ("shC", "shL", "shoulderHalf"), ("shC", "shR", "shoulderHalf"),
+    ("shC", "headC", "neck"),
+    ("shL", "elL", "upperArm"), ("elL", "wrL", "forearm"),
+    ("shR", "elR", "upperArm"), ("elR", "wrR", "forearm"),
+    ("hipL", "knL", "thigh"), ("knL", "anL", "shin"),
+    ("hipR", "knR", "thigh"), ("knR", "anR", "shin"),
+]
+
+
+def retarget_ratio(frame_pts, src_rig, dst_rig):
+    """One frame of measured points -> the same points on the lunge subject's
+    proportions.
+
+    Forcing every bone to the target's exact length would keep direction but
+    throw away projection: a limb foreshortened to 60% in the recording would
+    pop out to full length and stop looking measured. Instead each bone's
+    offset from its parent joint is scaled by one constant, dst/src rest
+    length, walking outward from hipC. Every measured direction and every
+    measured projection survives; only the bone's own scale changes.
+    """
+    out = {"hipC": frame_pts["hipC"]}
+    for parent, child, bone in _HIERARCHY:
+        ox, oy = out[parent]                  # where the parent landed after rescaling
+        px, py = frame_pts[parent]            # where it was measured — the bone vector
+        cx, cy = frame_pts[child]             # is child - parent in the *original* frame
+        ratio = (dst_rig[bone] / src_rig[bone]) if src_rig[bone] else 1.0
+        out[child] = (ox + (cx - px) * ratio, oy + (cy - py) * ratio)
+    return out
+
+
+def auto_flip(tracks, lo, hi):
+    """True if the recording's forward reach points at +x and should be mirrored.
+
+    The captured clips face -x by convention (toWorld() in the template flips
+    on that). Forward is wherever a lead wrist or ankle reaches furthest from
+    the hips — the same reach_joints signal auto_strike() measures — so the
+    two stay consistent: whichever way auto_flip mirrors the clip, auto_strike
+    finds its peak on the -x side. A strike can happen with little net hip
+    travel (a reach more than a step), so hip excursion alone is not a
+    reliable proxy for it and is kept only as a fallback for a subject who
+    barely reaches at all, then head lean relative to the hips after that.
+    """
+    reach_names = ("wrL", "wrR", "anL", "anR")
+    best = 0.0
+    for i in range(lo, hi + 1):
+        hip_x = tracks["hipC"][i][0]
+        for name in reach_names:
+            d = tracks[name][i][0] - hip_x
+            if abs(d) > abs(best):
+                best = d
+    if abs(best) > 5:
+        return best > 0
+    x0 = tracks["hipC"][lo][0]
+    excursion = max((tracks["hipC"][i][0] - x0 for i in range(lo, hi + 1)), key=abs)
+    if abs(excursion) > 5:
+        return excursion > 0
+    lean = sum(tracks["headC"][i][0] - tracks["hipC"][i][0] for i in range(lo, hi + 1))
+    return lean > 0
+
+
+_REACH_JOINTS = [POINTS.index(n) for n in ("wrL", "wrR", "anL", "anR")]
+
+
+def auto_strike(clip_frames):
+    """[lo, hi] clip-frame span where forward reach is within ~85% of its peak.
+
+    Frames are already hip-relative (pose_at()'s output), and the clip faces
+    -x, so "forward" is the most negative x any lead wrist or ankle reaches.
+    Same [lo, hi] contract as CLIPS.lunge's `active`.
+    """
+    reach = [max(-fr[2 * i] for i in _REACH_JOINTS) for fr in clip_frames]
+    peak_i = max(range(len(reach)), key=lambda i: reach[i])
+    peak = reach[peak_i]
+    if peak <= 0:
+        return [0, len(clip_frames) - 1]
+    thresh = 0.85 * peak
+    lo = hi = peak_i
+    while lo > 0 and reach[lo - 1] >= thresh:
+        lo -= 1
+    while hi < len(reach) - 1 and reach[hi + 1] >= thresh:
+        hi += 1
+    return [lo, hi]
+
+
+def build_custom_clip(payload_frames, w, h, fps, dst_rig, k, smooth=3, flip=None):
+    """A recorded move -> a clip in exactly the shape the other clips use.
+
+    Runs the same track_subject -> point_tracks -> smooth_points pipeline the
+    lunge itself went through, measures the recording's own bone lengths with
+    measure_rig_dynamic(), retargets every frame onto `dst_rig` (the lunge
+    subject's proportions) with retarget_ratio(), then hands off to pose_at() -
+    the same function that flattens every other clip. No angle is ever solved.
+
+    The flip decision is made *after* retargeting, not before: each bone is
+    rescaled by its own dst/src ratio, and when the recorded subject's
+    proportions differ a lot from the lunge subject's, that can change which
+    direction the net reach from the hips actually points. auto_flip and
+    auto_strike need to agree on the same geometry, so both read the
+    retargeted frames. Negating x before or after retarget_ratio's linear,
+    hip-relative scaling gives the same hip-centered result either way, so
+    flipping post-retarget costs nothing.
+    """
+    n = len(payload_frames)
+    tracked = track_subject(payload_frames, w, h)
+    raw_pts = point_tracks(tracked)
+    pts = smooth_points(raw_pts, smooth)
+
+    src_rig = measure_rig_dynamic(pts, tracked, 0, n - 1)
+
+    retgt = {name: [] for name in POINTS}
+    for i in range(n):
+        frame_pts = {name: pts[name][i] for name in POINTS}
+        placed = retarget_ratio(frame_pts, src_rig, dst_rig)
+        for name in POINTS:
+            retgt[name].append(placed[name])
+
+    if flip is None:
+        flip = auto_flip(retgt, 0, n - 1)
+    if flip:
+        retgt = {name: [(-x, y) for x, y in seq] for name, seq in retgt.items()}
+
+    frames = [pose_at(retgt, i, k) for i in range(n)]
+    # retarget_ratio() anchors the walk at hipC and never rescales it, so it's
+    # still in the recording's own pixel space — unlike every other joint, which
+    # comes out rescaled bone-by-bone onto dst_rig. Multiplying that raw delta by
+    # `k` (calibrated for the lunge video's pixel space) would compare two
+    # different cameras' pixel spaces as if they were the same one, so the hip's
+    # own travel needs the same src->dst rescale the bones got, via one overall
+    # body-size ratio.
+    body_ratio = dst_rig["height"] / src_rig["height"] if src_rig["height"] else 1.0
+    hip0 = retgt["hipC"][0][0]
+    root = [round((retgt["hipC"][i][0] - hip0) * body_ratio * k, 1) for i in range(n)]
+    active = auto_strike(frames)
+    detected = sum(1 for f in payload_frames if f.get("people"))
+
+    return {
+        "fps": round(fps, 3),
+        "frames": frames,
+        "root": root,
+        "active": active,
+        "flip": bool(flip),
+        "source": f"recorded, {n} frames, {detected} detected",
+        "note": f"recorded move &mdash; {n} frames captured at {fps:.1f}fps, {detected} with a "
+                f"detection, retargeted onto the lunge subject's proportions with one ratio per "
+                f"bone. Nothing is solved from angles.",
+        "measured": True,
+    }
+
+
+# --------------------------------------------------------------------------
 # 2. Keypoints -> angles  (only the procedural walk still needs these)
 # --------------------------------------------------------------------------
 
@@ -502,6 +700,54 @@ def build_html(data_json: str) -> str:
   footer{ margin-top:1.75rem; padding-top:1.25rem; border-top:1px solid var(--border-soft); font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text-faint); line-height:1.7; }
   footer code{ background:var(--surface-2); padding:0.05rem 0.35rem; border-radius:3px; color:var(--text-dim); }
   ::selection{ background:var(--teal-dim); color:#fff; }
+
+  .rec-open-btn{ font-family:'IBM Plex Mono', monospace; font-size:0.68rem; letter-spacing:0.04em; text-transform:uppercase; color:var(--teal); background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:0.45rem 0.8rem; cursor:pointer; }
+  .rec-open-btn:hover{ border-color:var(--teal-dim); }
+  .rec-open-btn:disabled{ color:var(--text-faint); cursor:not-allowed; border-color:var(--border); }
+  .rec-modal{ position:absolute; inset:0; background:rgba(13,17,22,0.92); display:flex; align-items:center; justify-content:center; z-index:10; padding:1.25rem; line-height:1.5; }
+  .rec-modal[hidden]{ display:none; }
+  .rec-panel{ background:var(--surface); border:1px solid var(--border); border-radius:12px; width:min(880px, 100%); max-height:100%; overflow:auto; display:flex; flex-direction:column; }
+  .rec-head{ display:flex; justify-content:space-between; align-items:center; padding:0.85rem 1.1rem; border-bottom:1px solid var(--border-soft); }
+  .rec-head h3{ font-family:'Sora', sans-serif; font-size:0.92rem; margin:0; font-weight:600; }
+  .rec-close{ background:none; border:none; color:var(--text-dim); font-size:1.3rem; line-height:1; cursor:pointer; padding:0.1rem 0.5rem; }
+  .rec-close:hover{ color:var(--text); }
+  .rec-body{ padding:1.1rem; display:flex; flex-direction:column; gap:0.85rem; }
+  .rec-note{ font-size:0.75rem; color:var(--text-dim); line-height:1.55; margin:0; }
+  .rec-note b{ color:var(--teal); font-weight:600; }
+  .rec-server-note{ font-size:0.75rem; color:var(--warn); margin:0; }
+  .rec-capture-stage{ position:relative; width:100%; max-width:480px; aspect-ratio:4/3; background:#000; border-radius:8px; overflow:hidden; margin:0 auto; }
+  .rec-capture-stage video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  .rec-capture-stage canvas{ position:absolute; inset:0; width:100%; height:100%; transform:scaleX(-1); }
+  .rec-countdown{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:'Sora', sans-serif; font-weight:700; font-size:4.5rem; color:#fff; text-shadow:0 2px 14px rgba(0,0,0,0.65); pointer-events:none; }
+  .rec-timebar{ position:absolute; left:0; right:0; bottom:0; height:5px; background:rgba(255,255,255,0.15); }
+  .rec-timebar i{ display:block; height:100%; width:0%; background:var(--warn); }
+  .rec-controls{ display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center; justify-content:center; }
+  .rec-body button{ font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text); background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:0.5rem 0.85rem; cursor:pointer; }
+  .rec-body button:hover:not(:disabled){ border-color:var(--teal-dim); }
+  .rec-body button:disabled{ color:var(--text-faint); cursor:not-allowed; }
+  .rec-body button.primary{ color:#12161b; background:var(--teal); border-color:var(--teal); font-weight:600; }
+  .rec-body input[type=text]{ font-family:'IBM Plex Mono', monospace; font-size:0.75rem; color:var(--text); background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:0.5rem 0.7rem; width:9rem; }
+  .rec-body input[type=range]{ accent-color:var(--teal); }
+  .rec-body label{ font-size:0.72rem; color:var(--text-dim); display:flex; align-items:center; gap:0.35rem; }
+  .rec-progress{ height:8px; border-radius:4px; background:var(--surface-2); overflow:hidden; }
+  .rec-progress i{ display:block; height:100%; width:0%; background:var(--teal); transition:width 0.15s; }
+  .rec-progress-text{ font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--text-dim); }
+  .rec-trim-wrap{ display:flex; gap:1.15rem; align-items:flex-start; flex-wrap:wrap; }
+  .rec-preview-box{ width:230px; flex:none; }
+  .rec-preview-box canvas{ width:100%; aspect-ratio:960/540; background:var(--stage-bg); border-radius:8px; border:1px solid var(--border); display:block; }
+  .rec-trim-col{ flex:1; min-width:280px; display:flex; flex-direction:column; gap:0.55rem; }
+  .rec-ticks{ display:flex; height:20px; border-radius:4px; overflow:hidden; border:1px solid var(--border); }
+  .rec-ticks i{ flex:1; background:var(--teal-dim); }
+  .rec-ticks i.miss{ background:var(--border-soft); }
+  .rec-range{ position:relative; height:32px; background:var(--surface-2); border-radius:6px; }
+  .rec-range .fill, .rec-range .strike-fill{ position:absolute; top:0; bottom:0; pointer-events:none; }
+  .rec-range .fill{ background:rgba(79,209,197,0.16); border-radius:6px; }
+  .rec-range .strike-fill{ background:rgba(242,181,68,0.38); }
+  .rec-handle{ position:absolute; top:0; bottom:0; width:10px; margin-left:-5px; cursor:ew-resize; border-radius:3px; touch-action:none; }
+  .rec-handle.io{ background:var(--teal); }
+  .rec-handle.strike{ background:var(--amber); width:8px; margin-left:-4px; }
+  .rec-trim-meta{ font-family:'IBM Plex Mono', monospace; font-size:0.68rem; color:var(--text-dim); display:flex; gap:1rem; flex-wrap:wrap; justify-content:space-between; }
+  .rec-save-row{ display:flex; gap:0.55rem; align-items:center; flex-wrap:wrap; }
 </style>
 
 <div class="wrap">
@@ -527,12 +773,89 @@ def build_html(data_json: str) -> str:
           <span>clip frame <b id="roFrame">&mdash;</b></span>
           <span class="strike-badge" id="roStrike">strike</span>
         </div>
+        <button id="recOpen" class="rec-open-btn">Record / upload a move</button>
+        <span id="recOpenNote" class="rec-progress-text" hidden></span>
       </div>
-      <div class="stage"><canvas id="cv"></canvas></div>
+      <div class="stage">
+        <canvas id="cv"></canvas>
+        <div id="recModal" class="rec-modal" hidden>
+          <div class="rec-panel">
+            <div class="rec-head">
+              <h3 id="recTitle">Record a move</h3>
+              <button id="recClose" class="rec-close" aria-label="close">&times;</button>
+            </div>
+            <div class="rec-body">
+              <p id="recServerNote" class="rec-server-note" hidden></p>
+
+              <section id="recStageCapture" class="rec-stage">
+                <p class="rec-note">Live skeleton is <b>preview only</b> &mdash; the move itself
+                  is measured by RF-DETR on the server, frame by frame, once you record.</p>
+                <div class="rec-capture-stage">
+                  <video id="recVideo" playsinline muted autoplay></video>
+                  <canvas id="recOverlay"></canvas>
+                  <div id="recCountdown" class="rec-countdown"></div>
+                  <div class="rec-timebar"><i id="recTimeFill"></i></div>
+                </div>
+                <div class="rec-controls">
+                  <button id="recStartCam">Start camera</button>
+                  <button id="recGo" disabled>Record (4s)</button>
+                  <button id="recUploadBtn">Upload a video&hellip;</button>
+                  <input type="file" id="recFileInput" accept="video/*" hidden>
+                </div>
+                <div id="recUploadPanel" class="rec-controls" hidden>
+                  <input type="range" id="recUploadStart" min="0" max="0" step="0.05" value="0" style="flex:1">
+                  <span id="recUploadWindow" class="rec-progress-text"></span>
+                  <button id="recUploadUse" class="primary">Use this 4s window</button>
+                </div>
+              </section>
+
+              <section id="recStageAnalyze" class="rec-stage" hidden>
+                <p class="rec-note">Sending each frame to RF-DETR &mdash; one at a time, the same
+                  way the arena's own clips were measured. Roughly 0.35s/frame on CPU.</p>
+                <div class="rec-progress"><i id="recProgFill"></i></div>
+                <div id="recProgText" class="rec-progress-text">&mdash;</div>
+              </section>
+
+              <section id="recStageTrim" class="rec-stage" hidden>
+                <div class="rec-trim-wrap">
+                  <div class="rec-preview-box">
+                    <canvas id="recPreview" width="960" height="540"></canvas>
+                    <div class="rec-trim-meta">
+                      <span id="recPreviewFrames">&mdash;</span>
+                      <label><input type="checkbox" id="recFlip"> flip facing</label>
+                    </div>
+                  </div>
+                  <div class="rec-trim-col">
+                    <div id="recTicks" class="rec-ticks"></div>
+                    <div id="recRange" class="rec-range">
+                      <div class="fill" id="recFill"></div>
+                      <div class="strike-fill" id="recStrikeFill"></div>
+                      <div class="rec-handle io" id="recInHandle"></div>
+                      <div class="rec-handle strike" id="recStrikeLoHandle"></div>
+                      <div class="rec-handle strike" id="recStrikeHiHandle"></div>
+                      <div class="rec-handle io" id="recOutHandle"></div>
+                    </div>
+                    <div class="rec-trim-meta">
+                      <span id="recWindowMeta">&mdash;</span>
+                      <span id="recStrikeMeta">&mdash;</span>
+                    </div>
+                    <div class="rec-save-row">
+                      <input type="text" id="recMoveName" value="custom" maxlength="24">
+                      <button id="recSave" class="primary">Use this move</button>
+                      <button id="recRetry">Record again</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="hintbar">
         <span class="k"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move</span>
         <span class="k"><kbd>Space</kbd> jump</span>
         <span class="k"><kbd>F</kbd> lunge</span>
+        <span class="k"><kbd>C</kbd> custom move</span>
         <span class="k"><kbd>P</kbd> pause</span>
         <span class="k"><kbd>R</kbd> restart</span>
         <span class="spacer">hit targets with the lead foot or hand, mid-lunge</span>
@@ -654,9 +977,11 @@ const LUNGE_COOLDOWN = 0.18;
 const ROUND = 60;
 const FOOT_R = 40, HAND_R = 32;
 
-const LUNGE_DUR = clipDur(CLIPS.lunge);
-const ACTIVE_T0 = CLIPS.lunge.active[0] / CLIPS.lunge.fps;
-const ACTIVE_T1 = CLIPS.lunge.active[1] / CLIPS.lunge.fps;
+/* One-shot attacks: 'lunge' always exists; 'custom' exists only once a move has
+   been recorded or baked in. Both are driven by the same state machine below. */
+function oneShot(state){ return CLIPS[state]; }
+function activeT(c){ return [c.active[0] / c.fps, c.active[1] / c.fps]; }
+function isAttacking(p){ return p.state === 'lunge' || p.state === 'custom'; }
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let dpr = 1, viewScale = 1;
@@ -691,6 +1016,7 @@ reset();
 const scratch = newPose(), poseBuf = newPose();
 function statePose(p, out){
   if(p.state === 'lunge')       return samplePose(CLIPS.lunge, p.t, out);
+  if(p.state === 'custom')      return samplePose(CLIPS.custom, p.t, out);
   if(p.state === 'walk')        return samplePose(CLIPS.walk, p.walkPhase * clipDur(CLIPS.walk), out);
   if(p.state === 'jump'){
     const base = samplePose(CLIPS.idle, p.t, out);
@@ -711,7 +1037,7 @@ function setState(s){
   game.fade.t = 0;
   p.state = s;
   p.t = 0;
-  if(s === 'lunge'){ p.hits.clear(); p.rootAnchorX = p.x; }
+  if(s === 'lunge' || s === 'custom'){ p.hits.clear(); p.rootAnchorX = p.x; }
 }
 
 /* Hip-to-lowest-foot distance for a pose: the figure stands on its feet
@@ -736,7 +1062,7 @@ function update(dt){
 
   const left  = keys.has('ArrowLeft')  || keys.has('KeyA');
   const right = keys.has('ArrowRight') || keys.has('KeyD');
-  const locked = p.state === 'lunge';          // no steering mid-lunge
+  const locked = isAttacking(p);                // no steering mid-attack
 
   let ax = 0;
   if(!locked){ if(left) ax -= ACCEL; if(right) ax += ACCEL; }
@@ -753,8 +1079,8 @@ function update(dt){
     p.walkPhase += (Math.abs(p.vx)/STRIDE) * dt;
 
   // state machine
-  if(p.state === 'lunge'){
-    if(p.t >= LUNGE_DUR){ p.cool = LUNGE_COOLDOWN; setState(p.grounded ? 'idle' : 'jump'); }
+  if(isAttacking(p)){
+    if(p.t >= clipDur(oneShot(p.state))){ p.cool = LUNGE_COOLDOWN; setState(p.grounded ? 'idle' : 'jump'); }
   } else if(!p.grounded){
     if(p.state !== 'jump') setState('jump');
   } else {
@@ -768,7 +1094,7 @@ function update(dt){
   /* The lunge drives its own horizontal travel: `root` is how far the hips
      moved on video, in game px, so the step-out covers real ground instead of
      happening on the spot. The clips face -x, so facing right flips the sign. */
-  if(p.state === 'lunge')
+  if(isAttacking(p))
     p.x = clamp(p.rootAnchorX + (p.dir === 1 ? -p.pose.root : p.pose.root), 60, W-60);
   const stance = stanceOffset(p.pose);
   if(p.grounded){
@@ -789,7 +1115,10 @@ function update(dt){
   }
 
   updateTargets(dt);
-  if(p.state === 'lunge' && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1) strike();
+  if(isAttacking(p)){
+    const [t0, t1] = activeT(oneShot(p.state));
+    if(p.t >= t0 && p.t <= t1) strike();
+  }
 
   for(let i = game.parts.length-1; i >= 0; i--){
     const q = game.parts[i];
@@ -892,10 +1221,14 @@ function draw(){
   ctx.fillStyle = 'rgba(79,209,197,0.045)'; ctx.fillRect(0, GROUND+1, W, H-GROUND-1);
 
   const p = game.p;
-  const active = p.state === 'lunge' && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1;
+  let active = false;
+  if(isAttacking(p)){
+    const [t0, t1] = activeT(oneShot(p.state));
+    active = p.t >= t0 && p.t <= t1;
+  }
 
   for(const t of game.targets) drawTarget(t);
-  drawFigure(p, active);
+  drawFigure(ctx, p, active);
 
   for(const q of game.parts){
     ctx.globalAlpha = clamp(q.life, 0, 1);
@@ -927,7 +1260,7 @@ function drawTarget(t){
   ctx.restore();
 }
 
-function drawFigure(p, active){
+function drawFigure(c, p, active){
   if(!p.pose) return;
   const j = place(p.pose, p.y);
   const s = STROKE;
@@ -935,18 +1268,18 @@ function drawFigure(p, active){
   // shadow, sized by height off the ground
   const lowest = Math.max(j.anL.y, j.anR.y);
   const air = clamp(1 - (GROUND - lowest)/220, 0.18, 1);
-  ctx.save();
-  ctx.globalAlpha = 0.28*air; ctx.fillStyle = '#000';
-  ctx.beginPath(); ctx.ellipse(p.x, GROUND+3, 42*air, 6*air, 0, 0, 6.2832); ctx.fill();
-  ctx.restore();
+  c.save();
+  c.globalAlpha = 0.28*air; c.fillStyle = '#000';
+  c.beginPath(); c.ellipse(p.x, GROUND+3, 42*air, 6*air, 0, 0, 6.2832); c.fill();
+  c.restore();
 
-  ctx.save();
-  ctx.translate(p.x, 0);
-  ctx.scale(p.dir === 1 ? -1 : 1, 1);      // facing is a canvas flip, nothing else
+  c.save();
+  c.translate(p.x, 0);
+  c.scale(p.dir === 1 ? -1 : 1, 1);      // facing is a canvas flip, nothing else
 
-  const line = (a,b,w) => { ctx.lineWidth = w*s; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); };
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = '#4fd1c5';
+  const line = (a,b,w) => { c.lineWidth = w*s; c.beginPath(); c.moveTo(a.x,a.y); c.lineTo(b.x,b.y); c.stroke(); };
+  c.lineCap = 'round';
+  c.strokeStyle = '#4fd1c5';
 
   line(j.hipL, j.hipR, 5); line(j.hipC, j.shC, 7); line(j.shL, j.shR, 5);
   line(j.shL, j.elL, 5); line(j.elL, j.wrL, 4);
@@ -954,25 +1287,25 @@ function drawFigure(p, active){
   line(j.hipL, j.knL, 6); line(j.knL, j.anL, 5);
   line(j.hipR, j.knR, 6); line(j.knR, j.anR, 5);
 
-  ctx.lineWidth = 5*s;
-  ctx.beginPath(); ctx.arc(j.headC.x, j.headC.y, RIG.headR, 0, 6.2832); ctx.stroke();
+  c.lineWidth = 5*s;
+  c.beginPath(); c.arc(j.headC.x, j.headC.y, RIG.headR, 0, 6.2832); c.stroke();
   line(j.shC, j.headC, 4);
 
-  ctx.fillStyle = '#1d2938';
+  c.fillStyle = '#1d2938';
   for(const k of ['elL','elR','wrL','wrR','knL','knR','anL','anR','shC','hipC']){
-    ctx.beginPath(); ctx.arc(j[k].x, j[k].y, 3.2*s, 0, 6.2832); ctx.fill();
-    ctx.lineWidth = 2*s; ctx.stroke();
+    c.beginPath(); c.arc(j[k].x, j[k].y, 3.2*s, 0, 6.2832); c.fill();
+    c.lineWidth = 2*s; c.stroke();
   }
-  ctx.restore();
+  c.restore();
 
   if(active){
     const foot = pickLead(j.anL, j.anR, p), hand = pickLead(j.wrL, j.wrR, p);
-    ctx.save();
-    ctx.strokeStyle = '#f2b544'; ctx.fillStyle = 'rgba(242,181,68,0.10)'; ctx.lineWidth = 2;
+    c.save();
+    c.strokeStyle = '#f2b544'; c.fillStyle = 'rgba(242,181,68,0.10)'; c.lineWidth = 2;
     for(const [pt, r] of [[foot, FOOT_R], [hand, HAND_R]]){
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, 6.2832); ctx.fill(); ctx.stroke();
+      c.beginPath(); c.arc(pt.x, pt.y, r, 0, 6.2832); c.fill(); c.stroke();
     }
-    ctx.restore();
+    c.restore();
   }
 }
 
@@ -1015,21 +1348,24 @@ function drawHud(){
   setText(hud.best,  'best',  String(best));
   hud.time.classList.toggle('low', game.time <= 10);
   setText(hud.state, 'state', p.state);
-  const inLunge = p.state === 'lunge';
-  const c = CLIPS.lunge;
-  setText(hud.frame, 'frame', inLunge
+  const attacking = isAttacking(p);
+  const c = attacking ? oneShot(p.state) : null;
+  setText(hud.frame, 'frame', attacking
     ? (Math.floor(frameIndex(c, p.t)) + 1) + '/' + c.frames.length
     : '—');
-  const active = inLunge && p.t >= ACTIVE_T0 && p.t <= ACTIVE_T1;
+  let active = false;
+  if(attacking){ const [t0, t1] = activeT(c); active = p.t >= t0 && p.t <= t1; }
   hud.strike.classList.toggle('on', active);
   for(const row of clipRows) row.el.classList.toggle('active', row.key === p.state);
 }
 
 const clipRows = [];
-(function buildClipList(){
+function buildClipList(){
   const list = el('clipList');
+  list.innerHTML = '';
+  clipRows.length = 0;
   let total = 0;
-  for(const key of ['idle','walk','lunge']){
+  for(const key of Object.keys(CLIPS)){
     const c = CLIPS[key];
     total += c.frames.length;
     const row = document.createElement('div');
@@ -1050,7 +1386,8 @@ const clipRows = [];
     DATA.meta.fps.toFixed(2) + ' fps. Joint positions are the measured ones, scaled by ' +
     DATA.meta.scale.toFixed(4) + '; drawing ported from <code>pose-stick-figure-rfdetr.html</code>. ' +
     'Self-contained: the only external request is the Google Fonts stylesheet.';
-})();
+}
+buildClipList();
 
 /* ---------------------------------------------------------------
    7. Input + loop
@@ -1066,11 +1403,15 @@ addEventListener('keydown', e => {
   if(over) return;
   if(paused) return;
   const p = game.p;
-  if((e.code === 'Space' || e.code === 'ArrowUp') && p.grounded && p.state !== 'lunge'){
+  if((e.code === 'Space' || e.code === 'ArrowUp') && p.grounded && !isAttacking(p)){
     p.vy = JUMPV; p.grounded = false; setState('jump');
     burst(p.x, GROUND, 8, '#4fd1c5', 0.35);
   }
-  if(e.code === 'KeyF' && p.state !== 'lunge' && p.cool <= 0){ setState('lunge'); }
+  if(e.code === 'KeyF' && !isAttacking(p) && p.cool <= 0){ setState('lunge'); }
+  if(e.code === 'KeyC' && !isAttacking(p) && p.cool <= 0){
+    if(CLIPS.custom) setState('custom');
+    else pop(p.x, p.y - 140, 'record a move first', '#8d99a6');
+  }
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); if(!over) paused = true; });
@@ -1087,6 +1428,465 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+</script>
+
+<script>
+/* ---------------------------------------------------------------
+   Recorder: capture or upload a move, analyze it on serve_game.py
+   with the exact same pipeline that produced the lunge, trim it,
+   and bind it to CLIPS.custom. Everything below reuses the arena's
+   own globals (CLIPS, place, drawFigure, samplePose, stanceOffset,
+   clipDur, frameIndex, W, H, GROUND, clamp, el, buildClipList) —
+   classic <script> tags share one top-level scope, so no wiring is
+   needed to reach them.
+   --------------------------------------------------------------- */
+const REC = {
+  stream:null, frameW:640, frameH:480,
+  clipResp:null, n:0, inF:0, outF:0, strikeLo:0, strikeHi:0, fps:30,
+  baseFlip:false, userFlip:false,
+};
+const sleep = ms => new Promise(res => setTimeout(res, ms));
+const clampInt = (v,lo,hi) => v < lo ? lo : v > hi ? hi : v;
+
+function mirrorClipFrames(frames){
+  return frames.map(fr => fr.map((v,i) => i % 2 === 0 ? -v : v));
+}
+
+/* --- server availability -------------------------------------- */
+async function checkServer(){
+  try{ const r = await fetch('/health', {cache:'no-store'}); return r.ok; }
+  catch(e){ return false; }
+}
+
+/* --- modal open/close ------------------------------------------- */
+function showRecStage(name){
+  el('recStageCapture').hidden = name !== 'capture';
+  el('recStageAnalyze').hidden = name !== 'analyze';
+  el('recStageTrim').hidden    = name !== 'trim';
+  el('recTitle').textContent = name === 'capture' ? 'Record a move'
+                              : name === 'analyze' ? 'Analyzing…' : 'Trim and preview';
+}
+function stopCameraStream(){
+  if(REC.stream){ REC.stream.getTracks().forEach(t => t.stop()); REC.stream = null; }
+}
+function resetCaptureUI(){
+  el('recGo').disabled = true;
+  el('recStartCam').disabled = false;
+  el('recUploadPanel').hidden = true;
+  el('recTimeFill').style.width = '0%';
+  el('recCountdown').textContent = '';
+  const video = el('recVideo');
+  video.pause(); video.removeAttribute('src'); video.srcObject = null; video.style.transform = '';
+  stopOverlayLoop();
+}
+function openRecModal(){
+  el('recModal').hidden = false;
+  showRecStage('capture');
+}
+function closeRecModal(){
+  el('recModal').hidden = true;
+  stopOverlayLoop();
+  stopCameraStream();
+  resetCaptureUI();
+}
+el('recOpen').addEventListener('click', () => { if(!el('recOpen').disabled) openRecModal(); });
+el('recClose').addEventListener('click', closeRecModal);
+
+/* --- live MediaPipe overlay: preview only ------------------------
+   The move itself never comes from this — it's RF-DETR, on the
+   server, once you record. If the CDN is unreachable this silently
+   drops out and recording still works. */
+const REC_L = { nose:0, earL:7, earR:8, shL:11, shR:12, elL:13, elR:14,
+                wrL:15, wrR:16, hipL:23, hipR:24, knL:25, knR:26, anL:27, anR:28 };
+const REC_EDGES = [
+  [REC_L.shL,REC_L.shR],[REC_L.shL,REC_L.elL],[REC_L.elL,REC_L.wrL],
+  [REC_L.shR,REC_L.elR],[REC_L.elR,REC_L.wrR],
+  [REC_L.shL,REC_L.hipL],[REC_L.shR,REC_L.hipR],[REC_L.hipL,REC_L.hipR],
+  [REC_L.hipL,REC_L.knL],[REC_L.knL,REC_L.anL],[REC_L.hipR,REC_L.knR],[REC_L.knR,REC_L.anR],
+];
+let recLandmarker = null, recOverlayRunning = false;
+async function ensureLandmarker(){
+  if(recLandmarker) return recLandmarker;
+  const mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+  const files = await mod.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  recLandmarker = await mod.PoseLandmarker.createFromOptions(files, {
+    baseOptions:{ modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                 delegate:'GPU' },
+    runningMode:'VIDEO', numPoses:1,
+  });
+  return recLandmarker;
+}
+function drawOverlaySkeleton(c2, lm, w, h){
+  c2.strokeStyle = '#4fd1c5'; c2.fillStyle = '#4fd1c5'; c2.lineWidth = 2.5; c2.lineCap = 'round';
+  c2.beginPath();
+  for(const [a,b] of REC_EDGES){
+    const pa = lm[a], pb = lm[b];
+    if(!pa || !pb) continue;
+    if((pa.visibility !== undefined && pa.visibility < 0.4) ||
+       (pb.visibility !== undefined && pb.visibility < 0.4)) continue;
+    c2.moveTo(pa.x*w, pa.y*h); c2.lineTo(pb.x*w, pb.y*h);
+  }
+  c2.stroke();
+  for(const i of Object.values(REC_L)){
+    const p = lm[i];
+    if(!p || (p.visibility !== undefined && p.visibility < 0.4)) continue;
+    c2.beginPath(); c2.arc(p.x*w, p.y*h, 3, 0, 6.2832); c2.fill();
+  }
+}
+function startOverlayLoop(){
+  if(recOverlayRunning) return;
+  recOverlayRunning = true;
+  const video = el('recVideo'), cv2 = el('recOverlay'), c2 = cv2.getContext('2d');
+  let lastVT = -1;
+  async function tick(){
+    if(!recOverlayRunning) return;
+    const r = cv2.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2);
+    cv2.width = Math.max(1, r.width*d); cv2.height = Math.max(1, r.height*d);
+    c2.setTransform(d,0,0,d,0,0);
+    c2.clearRect(0, 0, r.width, r.height);
+    try{
+      const lm = await ensureLandmarker();
+      if(video.readyState >= 2 && video.currentTime !== lastVT){
+        lastVT = video.currentTime;
+        const res = lm.detectForVideo(video, performance.now());
+        if(res.landmarks && res.landmarks[0]) drawOverlaySkeleton(c2, res.landmarks[0], r.width, r.height);
+      }
+    }catch(e){ /* CDN or model unavailable — overlay just doesn't draw */ }
+    if(recOverlayRunning) requestAnimationFrame(tick);
+  }
+  tick();
+}
+function stopOverlayLoop(){ recOverlayRunning = false; }
+
+/* --- capture: camera --------------------------------------------- */
+el('recStartCam').addEventListener('click', async () => {
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640, height:480}});
+    REC.stream = stream;
+    const video = el('recVideo');
+    video.srcObject = stream;
+    video.style.transform = '';
+    await video.play();
+    el('recGo').disabled = false;
+    el('recStartCam').disabled = true;
+    startOverlayLoop();
+  }catch(e){
+    el('recServerNote').hidden = false;
+    el('recServerNote').textContent = 'camera unavailable: ' + e.message;
+  }
+});
+el('recGo').addEventListener('click', () => {
+  el('recGo').disabled = true;
+  runCountdownThenCapture();
+});
+async function runCountdownThenCapture(){
+  const cd = el('recCountdown');
+  for(const label of ['3','2','1','GO!']){ cd.textContent = label; await sleep(600); }
+  cd.textContent = '';
+  await captureFrames(el('recVideo'), null);
+}
+
+/* --- capture: upload ---------------------------------------------- */
+el('recUploadBtn').addEventListener('click', () => el('recFileInput').click());
+el('recFileInput').addEventListener('change', async () => {
+  const f = el('recFileInput').files && el('recFileInput').files[0];
+  if(!f) return;
+  stopCameraStream(); stopOverlayLoop();
+  const video = el('recVideo');
+  video.srcObject = null;
+  video.style.transform = 'none';
+  video.src = URL.createObjectURL(f);
+  video.loop = true;
+  await new Promise(res => { video.onloadedmetadata = res; });
+  const maxStart = Math.max(0, video.duration - 4);
+  const startInput = el('recUploadStart');
+  startInput.max = maxStart.toFixed(2); startInput.value = '0';
+  updateUploadWindowLabel();
+  el('recUploadPanel').hidden = false;
+  el('recGo').disabled = true;
+  video.currentTime = 0;
+  await video.play().catch(() => {});
+});
+function updateUploadWindowLabel(){
+  const s = +el('recUploadStart').value, video = el('recVideo');
+  el('recUploadWindow').textContent =
+    s.toFixed(1) + 's – ' + (s+4).toFixed(1) + 's  /  ' + video.duration.toFixed(1) + 's';
+}
+el('recUploadStart').addEventListener('input', () => {
+  updateUploadWindowLabel();
+  el('recVideo').currentTime = +el('recUploadStart').value;
+});
+el('recUploadUse').addEventListener('click', async () => {
+  const video = el('recVideo'), startT = +el('recUploadStart').value;
+  el('recUploadPanel').hidden = true;
+  video.loop = false;
+  await captureFrames(video, startT);
+});
+function seekTo(video, t){
+  return new Promise(res => {
+    const onSeeked = () => { video.removeEventListener('seeked', onSeeked); res(); };
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = t;
+  });
+}
+
+/* --- capture -> blobs, live from the camera or seeked from a file - */
+async function captureFrames(video, uploadStartT){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = Math.min(1, 640 / Math.max(vw, vh));
+  REC.frameW = Math.max(1, Math.round(vw*scale));
+  REC.frameH = Math.max(1, Math.round(vh*scale));
+  const grabCv = document.createElement('canvas');
+  grabCv.width = REC.frameW; grabCv.height = REC.frameH;
+  const grabCtx = grabCv.getContext('2d', {willReadFrequently:false});
+  const blobs = [];
+  const FPS = 30, CAP_MS = 4000, MAX_FRAMES = 120;
+
+  if(uploadStartT === null){
+    /* live: aim for a steady 30fps clock, hard-stopped at 4.0s. The pacer
+       only holds if drawImage+toBlob fits in 33ms; on a slow machine it
+       falls behind and the real rate drops. The clip's fps has to be the
+       rate the frames were actually taken at, not the rate we asked for,
+       or the move replays faster than it happened. */
+    const t0 = performance.now();
+    let nextT = t0;
+    while(performance.now() - t0 < CAP_MS && blobs.length < MAX_FRAMES){
+      grabCtx.drawImage(video, 0, 0, grabCv.width, grabCv.height);
+      blobs.push(await new Promise(res => grabCv.toBlob(res, 'image/jpeg', 0.8)));
+      el('recTimeFill').style.width = Math.min(100, 100*(performance.now()-t0)/CAP_MS) + '%';
+      nextT += 1000/FPS;
+      const wait = nextT - performance.now();
+      if(wait > 0) await sleep(wait);
+    }
+    const elapsed = (performance.now() - t0) / 1000;
+    REC.fps = elapsed > 0 ? blobs.length / elapsed : FPS;
+  }else{
+    // upload: pull frames by seeking through the chosen window
+    for(let i = 0; i < MAX_FRAMES; i++){
+      const t = uploadStartT + i/FPS;
+      if(t > video.duration) break;
+      await seekTo(video, t);
+      grabCtx.drawImage(video, 0, 0, grabCv.width, grabCv.height);
+      blobs.push(await new Promise(res => grabCv.toBlob(res, 'image/jpeg', 0.8)));
+      el('recTimeFill').style.width = Math.min(100, 100*(i+1)/(FPS*4)) + '%';
+    }
+    REC.fps = FPS;   // seeked to exactly i/FPS, so this one is exact
+  }
+  el('recTimeFill').style.width = '100%';
+  stopOverlayLoop();
+  const payloadFrames = await analyzeFrames(blobs);
+  await finishAnalysis(payloadFrames);
+}
+
+/* --- analyze: one frame in flight at a time, same as the live pump  */
+async function postKeypoints(blob){
+  const r = await fetch('/keypoints', {method:'POST', headers:{'Content-Type':'image/jpeg'}, body:blob});
+  if(!r.ok) throw new Error('server ' + r.status);
+  return r.json();
+}
+async function analyzeFrames(blobs){
+  showRecStage('analyze');
+  el('recProgFill').style.width = '0%';
+  const results = [];
+  const t0 = performance.now();
+  for(let i = 0; i < blobs.length; i++){
+    let payload;
+    try{ payload = await postKeypoints(blobs[i]); }
+    catch(e){ payload = {people:[]}; }
+    results.push(payload);
+    const elapsed = (performance.now() - t0) / 1000;
+    const eta = Math.max(0, (elapsed/(i+1)) * (blobs.length-i-1));
+    el('recProgFill').style.width = (100*(i+1)/blobs.length) + '%';
+    el('recProgText').textContent = 'frame ' + (i+1) + ' / ' + blobs.length + '  —  ETA ' + eta.toFixed(0) + 's';
+  }
+  return results;
+}
+async function finishAnalysis(payloadFrames){
+  el('recProgText').textContent = 'building the clip…';
+  try{
+    const r = await fetch('/clip', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ frames: payloadFrames, w: REC.frameW, h: REC.frameH, fps: REC.fps, smooth: 3 }),
+    });
+    if(!r.ok) throw new Error('server ' + r.status);
+    const resp = await r.json();
+    openTrimStage(resp);
+  }catch(e){
+    el('recProgText').textContent = 'error building the clip: ' + e.message;
+  }
+}
+
+/* --- trim + preview ------------------------------------------------ */
+let recPreviewRunning = false;
+function openTrimStage(resp){
+  REC.clipResp = resp;
+  REC.n = resp.clip.frames.length;
+  REC.inF = 0; REC.outF = REC.n - 1;
+  REC.strikeLo = resp.clip.active[0]; REC.strikeHi = resp.clip.active[1];
+  REC.baseFlip = resp.flip; REC.userFlip = resp.flip;
+  el('recFlip').checked = resp.flip;
+  el('recMoveName').value = 'custom';
+  renderTicks(resp.diagnostics);
+  layoutHandles();
+  showRecStage('trim');
+  if(!recPreviewRunning) startPreviewLoop();
+}
+function renderTicks(diag){
+  const wrap = el('recTicks');
+  wrap.innerHTML = '';
+  for(const d of diag){
+    const i = document.createElement('i');
+    if(!d.detected) i.className = 'miss';
+    wrap.appendChild(i);
+  }
+}
+function pct(i){ return (100 * i / Math.max(1, REC.n - 1)) + '%'; }
+function layoutHandles(){
+  const span = Math.max(1, REC.n - 1);
+  el('recInHandle').style.left = pct(REC.inF);
+  el('recOutHandle').style.left = pct(REC.outF);
+  el('recStrikeLoHandle').style.left = pct(REC.strikeLo);
+  el('recStrikeHiHandle').style.left = pct(REC.strikeHi);
+  el('recFill').style.left = pct(REC.inF);
+  el('recFill').style.width = (100*(REC.outF-REC.inF)/span) + '%';
+  el('recStrikeFill').style.left = pct(REC.strikeLo);
+  el('recStrikeFill').style.width = (100*(REC.strikeHi-REC.strikeLo)/span) + '%';
+  const fps = REC.clipResp.clip.fps;
+  el('recWindowMeta').textContent = 'window ' + (REC.inF+1) + '–' + (REC.outF+1) + ' / ' + REC.n +
+    '  (' + ((REC.outF-REC.inF+1)/fps).toFixed(2) + 's)';
+  el('recStrikeMeta').textContent = 'strike ' + (REC.strikeLo+1) + '–' + (REC.strikeHi+1);
+  el('recPreviewFrames').textContent = (REC.outF-REC.inF+1) + ' frames selected';
+}
+function applyHandleMove(kind, i){
+  if(kind === 'in') REC.inF = clampInt(i, 0, REC.outF - 1);
+  else if(kind === 'out') REC.outF = clampInt(i, REC.inF + 1, REC.n - 1);
+  else if(kind === 'strikeLo') REC.strikeLo = clampInt(i, REC.inF, REC.strikeHi);
+  else if(kind === 'strikeHi') REC.strikeHi = clampInt(i, REC.strikeLo, REC.outF);
+}
+function wireHandle(handleId, kind){
+  const handle = el(handleId);
+  handle.addEventListener('pointerdown', e => {
+    handle.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const rect = el('recRange').getBoundingClientRect();
+      const frac = clamp((ev.clientX - rect.left) / rect.width, 0, 1);
+      applyHandleMove(kind, Math.round(frac * (REC.n - 1)));
+      layoutHandles();
+    };
+    const up = () => {
+      handle.releasePointerCapture(e.pointerId);
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+  });
+}
+wireHandle('recInHandle', 'in');
+wireHandle('recOutHandle', 'out');
+wireHandle('recStrikeLoHandle', 'strikeLo');
+wireHandle('recStrikeHiHandle', 'strikeHi');
+el('recFlip').addEventListener('change', () => { REC.userFlip = el('recFlip').checked; });
+
+function startPreviewLoop(){
+  recPreviewRunning = true;
+  const cv2 = el('recPreview'), c2 = cv2.getContext('2d');
+  let last = performance.now(), t = 0;
+  const pp = { x: W/2, y: 0, dir: 1, pose: null };
+  function tick(now){
+    if(el('recStageTrim').hidden){ recPreviewRunning = false; return; }
+    const dt = Math.min(0.05, (now-last)/1000); last = now;
+    const frames = REC.userFlip === REC.baseFlip ? REC.clipResp.clip.frames : mirrorClipFrames(REC.clipResp.clip.frames);
+    const sliced = { fps: REC.clipResp.clip.fps, loop: true, frames: frames.slice(REC.inF, REC.outF + 1) };
+    t = (t + dt) % Math.max(1/60, clipDur(sliced));
+    const pose = samplePose(sliced, t);
+    pp.pose = pose;
+    pp.y = GROUND - stanceOffset(pose);
+    const localLo = clampInt(REC.strikeLo - REC.inF, 0, sliced.frames.length - 1);
+    const localHi = clampInt(REC.strikeHi - REC.inF, 0, sliced.frames.length - 1);
+    const fi = Math.round(frameIndex(sliced, t));
+    const active = fi >= localLo && fi <= localHi;
+
+    c2.setTransform(1,0,0,1,0,0);
+    c2.clearRect(0, 0, W, H);
+    c2.fillStyle = '#0d1116'; c2.fillRect(0, 0, W, H);
+    c2.strokeStyle = '#2f6b66'; c2.lineWidth = 2;
+    c2.beginPath(); c2.moveTo(0, GROUND+0.5); c2.lineTo(W, GROUND+0.5); c2.stroke();
+    drawFigure(c2, pp, active);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function buildFinalClip(){
+  const src = REC.clipResp.clip;
+  const frames0 = REC.userFlip === REC.baseFlip ? src.frames : mirrorClipFrames(src.frames);
+  const root0 = REC.userFlip === REC.baseFlip ? src.root : src.root.map(v => -v);
+  const lo = REC.inF, hi = REC.outF;
+  const frames = frames0.slice(lo, hi + 1);
+  const rootWindow = root0.slice(lo, hi + 1);
+  const r0 = rootWindow[0];
+  const root = rootWindow.map(v => Math.round((v - r0) * 10) / 10);
+  const active = [clampInt(REC.strikeLo - lo, 0, frames.length - 1),
+                  clampInt(REC.strikeHi - lo, 0, frames.length - 1)];
+  return { fps: src.fps, frames, root, active, source: src.source, note: src.note, measured: true };
+}
+async function saveMove(){
+  const clip = buildFinalClip();
+  const name = el('recMoveName').value.trim() || 'custom';
+  try{
+    await fetch('/moves', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, clip}),
+    });
+  }catch(e){ /* server may be gone; the move still lives in localStorage below */ }
+  try{ localStorage.setItem('lungeArenaCustomMove', JSON.stringify(clip)); }catch(e){}
+  CLIPS.custom = clip;
+  buildClipList();
+  closeRecModal();
+}
+el('recSave').addEventListener('click', async () => {
+  el('recSave').disabled = true;
+  try{ await saveMove(); }
+  finally{ el('recSave').disabled = false; }
+});
+el('recRetry').addEventListener('click', () => {
+  resetCaptureUI();
+  showRecStage('capture');
+});
+
+/* --- boot: server check, and a move already saved on disk/localStorage ---
+   The server's custom_moves.json is the move's real home — it survives a
+   cleared browser profile or a different browser entirely. localStorage is
+   only the fallback for when the server isn't running. */
+(async function initRecorder(){
+  const ok = await checkServer();
+  if(!CLIPS.custom){
+    let loaded = false;
+    if(ok){
+      try{
+        const r = await fetch('/moves', {cache:'no-store'});
+        if(r.ok){
+          const store = await r.json();
+          const cur = store.current && store.moves[store.current];
+          if(cur){ CLIPS.custom = cur.clip; buildClipList(); loaded = true; }
+        }
+      }catch(e){}
+    }
+    if(!loaded){
+      try{
+        const raw = localStorage.getItem('lungeArenaCustomMove');
+        if(raw){ CLIPS.custom = JSON.parse(raw); buildClipList(); }
+      }catch(e){}
+    }
+  }
+  if(!ok){
+    el('recOpen').disabled = true;
+    el('recOpen').title = 'run python3 lunge_pose_demo/serve_game.py to record';
+    el('recOpenNote').hidden = false;
+    el('recOpenNote').textContent = 'run serve_game.py to record';
+  }
+})();
 </script>
 """.replace("__DATA_JSON__", data_json)
 
@@ -1112,6 +1912,9 @@ def main() -> int:
                     help="source px -> game px (default: auto, sizing the subject to "
                          f"{FIGURE_H:.0f} px tall)")
     ap.add_argument("--out", default=str(HERE / "lunge_game.html"))
+    ap.add_argument("--custom", default=None, metavar="custom_moves.json",
+                    help="bake a recorded move (written by serve_game.py) into the page as "
+                         "CLIPS.custom, so it plays with no server and no browser storage")
     args = ap.parse_args()
 
     src = json.loads(Path(args.data).read_text())
@@ -1239,6 +2042,16 @@ def main() -> int:
         },
     }
 
+    if args.custom:
+        moves = json.loads(Path(args.custom).read_text())
+        current = moves.get("current")
+        entry = moves.get("moves", {}).get(current) if current else None
+        if entry is None:
+            print(f"--custom: {args.custom} has no current move, skipping", file=sys.stderr)
+        else:
+            clips["custom"] = entry["clip"]
+            print(f"baked custom move {current!r} into the page as CLIPS.custom")
+
     data = {
         "points": POINTS,
         "rig": {
@@ -1246,6 +2059,13 @@ def main() -> int:
             # Stroke weights track the figure's size, so --scale resizes the
             # whole drawing rather than fattening a smaller stick figure.
             "stroke": round(0.86 * rig["height"] * k / FIGURE_H, 3),
+            # The retarget target for a recorded move: the lunge subject's own
+            # bone lengths, in game px. serve_game.py measures the same rig
+            # independently from lunge_all_frames.json; this copy is for the
+            # page and for anyone rebuilding a custom clip by hand.
+            "bones": {b: round(rig[b] * k, 2) for b in
+                      ("spine", "neck", "thigh", "shin", "upperArm", "forearm",
+                       "pelvisHalf", "shoulderHalf")},
         },
         "tuck": tuck,
         "meta": {

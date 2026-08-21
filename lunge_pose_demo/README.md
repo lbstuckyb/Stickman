@@ -21,6 +21,8 @@ attack animation, driven by the same keypoints rather than by hand-authored keyf
 | `build_frame_viewer.py` | reusable: image → annotated jpg + json + interactive viewer html | — |
 | `build_sequence_viewer.py` | reusable: video → raw json + interactive scrubber html | — |
 | `build_game.py` | reusable: per-frame keypoint json → clips + game html (no model inference) | — |
+| `serve_game.py` | local server: serves `lunge_game.html`, runs RF-DETR on recorded/uploaded video for the in-page recorder, reads/writes `custom_moves.json` | — |
+| `custom_moves.json` | recorded moves saved from the page (gitignored, written at runtime) | `serve_game.py` |
 
 The three `build_*.py` scripts are the actual source of the three HTML pages — everything in them
 (palette, layout, the "no video underneath, just the raw points and the fixed skeleton edge
@@ -100,9 +102,44 @@ on the way out.
 
 ### Playing it
 
-`←`/`→` (or `A`/`D`) move, `Space` jumps, `F` performs the captured lunge, `P` pauses and `R`
-restarts. The hitbox is read off the measured pose — circles at the lead ankle and lead wrist,
-live only during the lunge's strike window — and it sweeps forward with the step-out, putting
-the lead hand about 350 px ahead of where you pressed. Scoring means being in range *and*
-timing the press.
+`←`/`→` (or `A`/`D`) move, `Space` jumps, `F` performs the captured lunge, `C` performs your own
+recorded move (once you've recorded one — see below), `P` pauses and `R` restarts. The hitbox is
+read off the measured pose — circles at the lead ankle and lead wrist, live only during the
+move's strike window — and it sweeps forward with the step-out, putting the lead hand about
+350 px ahead of where you pressed. Scoring means being in range *and* timing the press.
 Hits build a combo; letting a target drift off the far edge resets it. Rounds last 60 seconds.
+
+### Recording your own move
+
+Opening `lunge_game.html` directly (`file://`) still plays `F` and any move already baked in or
+cached in the browser, but recording a new one needs a local model to analyze it against:
+
+```bash
+.venv/bin/python lunge_pose_demo/serve_game.py --resolution 384
+```
+
+then open `http://127.0.0.1:8000/` and click **Record / upload a move**. Record up to 4 seconds
+from a webcam (with a live MediaPipe skeleton overlay — preview only, not what gets measured) or
+upload a video and pick a 4-second window from it. Each frame is sent to the same RF-DETR model,
+threshold and tracker the lunge itself was built from; the result is trimmed and previewed before
+saving.
+
+What's measured, exactly as reported by the model, no different from the lunge: every joint
+position in every frame, the strike window (auto-detected from where a lead wrist or ankle
+reaches furthest, adjustable by hand in the trim step), and the hips' own frame-by-frame travel.
+What's altered is proportions only — each bone (spine, upper arm, forearm, thigh, shin, ...) is
+scaled by one constant, `lunge subject's bone length ÷ your bone length`, so your move plays out
+on the lunge character's body. Direction and foreshortening are never touched: a limb measured at
+60% projection in the recording still draws at 60%. Nothing is solved from angles, and the
+retargeting has to run before the strike window and facing direction are picked — differently
+proportioned bones can genuinely change which way a reach points, so both are read off the same
+retargeted frames rather than off the raw recording.
+
+Saving writes to `custom_moves.json` next to `serve_game.py` (the move's real home — it survives
+a cleared browser or a different machine) and mirrors to the browser's `localStorage` as an
+offline fallback; either way `C` works immediately, no reload. To ship a move with no server at
+all, bake it into the HTML:
+
+```bash
+python3 lunge_pose_demo/build_game.py --custom lunge_pose_demo/custom_moves.json
+```
