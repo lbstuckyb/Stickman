@@ -1,4 +1,4 @@
 .venv/
 __pycache__/
 *.pyc
-lunge_pose_demo/custom_moves.json
+game/custom_moves.json

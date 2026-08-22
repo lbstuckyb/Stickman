@@ -1,10 +1,10 @@
 """Local server for lunge_game.html's recorder: analyzes a captured move with
 RF-DETR and turns it into a clip in exactly the shape the baked-in lunge uses.
 
-    .venv/bin/python lunge_pose_demo/serve_game.py [--resolution 384] [--port 8000]
+    .venv/bin/python game/serve_game.py [--resolution 384] [--port 8000]
     then open http://127.0.0.1:8000/
 
-Modelled on ../serve_rfdetr.py. /keypoints has the same semantics as that
+Modelled on ../research/serve_rfdetr.py. /keypoints has the same semantics as that
 server's route — one JPEG in, one {people:[...]} payload out — copied
 verbatim. The new part is /clip: it imports build_game.py as a module and
 calls its build_custom_clip(), so a recorded move goes through literally the
@@ -60,7 +60,7 @@ def _load_lunge_rig():
     measured with, so retargeting the lunge subject onto their own proportions
     is close to the identity it should be.
     """
-    data_path = HERE / "lunge_all_frames.json"
+    data_path = HERE / "data" / "lunge_all_frames.json"
     src = json.loads(data_path.read_text(encoding="utf-8"))
     frames, vid = src["frames"], src["video"]
     tracked = bg.track_subject(frames, vid["w"], vid["h"])

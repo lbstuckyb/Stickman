@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 # COCO-17, the schema the preview checkpoint is trained on.
@@ -258,3 +259,39 @@ def covariance_ellipse(cov: np.ndarray, n_sigma: float = 1.0):
     a, b = n_sigma * np.sqrt(vals)
     angle = float(np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0])))
     return float(a), float(b), angle
+
+
+_TEAL = (197, 209, 79)      # BGR
+_AMBER = (68, 181, 242)
+_DIM = (150, 130, 108)
+
+
+def annotate(image: np.ndarray, kp) -> np.ndarray:
+    """Draw the skeleton + per-joint 1-sigma uncertainty ellipse over a BGR frame."""
+    out = image.copy()
+    for i in range(len(kp)):
+        xy = kp.xy[i].astype(int)
+        conf = kp.keypoint_confidence[i]
+        vis = kp.visible[i] if kp.visible is not None else np.ones(len(xy), bool)
+        cov = kp.data["covariance"][i]
+
+        x1, y1, x2, y2 = kp.data["xyxy"][i].astype(int)
+        cv2.rectangle(out, (x1, y1), (x2, y2), _DIM, 1)
+        cv2.putText(out, f"{kp.detection_confidence[i]:.2f}", (x1, max(14, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, _DIM, 1, cv2.LINE_AA)
+
+        for a, b in SKELETON:
+            if conf[a] < 0.3 or conf[b] < 0.3:
+                continue
+            cv2.line(out, tuple(xy[a]), tuple(xy[b]), _TEAL, 2, cv2.LINE_AA)
+
+        for j, (x, y) in enumerate(xy):
+            if conf[j] < 0.3:
+                continue
+            # 1-sigma ellipse: thick where the model calls the joint visible,
+            # thin where it thinks the joint is occluded but still findable.
+            ax_a, ax_b, angle = covariance_ellipse(cov[j], n_sigma=1.0)
+            cv2.ellipse(out, (int(x), int(y)), (max(1, int(ax_a)), max(1, int(ax_b))),
+                        angle, 0, 360, _AMBER, 2 if vis[j] else 1, cv2.LINE_AA)
+            cv2.circle(out, (int(x), int(y)), 3, _AMBER, -1, cv2.LINE_AA)
+    return out

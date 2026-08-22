@@ -16,8 +16,8 @@ them into points uses the subject's own measured bone lengths, so nothing change
 shape when the state changes.
 
 Usage:
-    python3 build_game.py
-    python3 build_game.py --idle 79:106 --lunge 106:134,154:188 --speed 1.4
+    python3 game/build_game.py
+    python3 game/build_game.py --idle 79:106 --lunge 106:134,154:188 --speed 1.4
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# COCO-17 indices — the same map as pose-stick-figure-rfdetr.html:158.
+# COCO-17 indices — the same map as ../research/pose-stick-figure-rfdetr.html:158.
 L = {
     "nose": 0, "eyeL": 1, "eyeR": 2, "earL": 3, "earR": 4,
     "shL": 5, "shR": 6, "elL": 7, "elR": 8, "wrL": 9, "wrR": 10,
@@ -43,7 +43,7 @@ POINTS = [
     "elL", "wrL", "elR", "wrR", "knL", "anL", "knR", "anR",
 ]
 # The walk is authored in angles before it is turned into points — same 10
-# channels readAngles() uses in ../pose-stick-figure-rfdetr.html.
+# channels readAngles() uses in ../research/pose-stick-figure-rfdetr.html.
 CHANNELS = [
     "spine", "head",
     "armLU", "armLF", "armRU", "armRF",
@@ -427,7 +427,7 @@ def _ang(a, b):
 def read_angles(kp):
     """kp: 17 dicts in source pixels. Returns (angles, confident).
 
-    Port of readAngles(), pose-stick-figure-rfdetr.html:241. Pixels rather than
+    Port of readAngles(), ../research/pose-stick-figure-rfdetr.html:241. Pixels rather than
     normalized coordinates, so the angles are measured in real proportions.
     """
     g = lambda name: kp[L[name]]
@@ -1384,7 +1384,7 @@ function buildClipList(){
     'Built by <code>build_game.py</code> from <code>lunge_all_frames.json</code> &mdash; ' +
     DATA.meta.detected + ' detections across ' + DATA.meta.n_frames + ' source frames at ' +
     DATA.meta.fps.toFixed(2) + ' fps. Joint positions are the measured ones, scaled by ' +
-    DATA.meta.scale.toFixed(4) + '; drawing ported from <code>pose-stick-figure-rfdetr.html</code>. ' +
+    DATA.meta.scale.toFixed(4) + '; drawing ported from <code>research/pose-stick-figure-rfdetr.html</code>. ' +
     'Self-contained: the only external request is the Google Fonts stylesheet.';
 }
 buildClipList();
@@ -1882,7 +1882,7 @@ el('recRetry').addEventListener('click', () => {
   }
   if(!ok){
     el('recOpen').disabled = true;
-    el('recOpen').title = 'run python3 lunge_pose_demo/serve_game.py to record';
+    el('recOpen').title = 'run python3 game/serve_game.py to record';
     el('recOpenNote').hidden = false;
     el('recOpenNote').textContent = 'run serve_game.py to record';
   }
@@ -1897,8 +1897,8 @@ el('recRetry').addEventListener('click', () => {
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--data", default=str(HERE / "lunge_all_frames.json"),
-                    help="per-frame keypoint JSON from build_sequence_viewer.py")
+    ap.add_argument("--data", default=str(HERE / "data" / "lunge_all_frames.json"),
+                    help="per-frame keypoint JSON from pipeline/build_sequence_viewer.py")
     ap.add_argument("--idle", default="79:106", metavar="LO:HI",
                     help="source frames for the idle loop (ping-ponged at runtime); also "
                          "the window the scale and the bone lengths are measured on")

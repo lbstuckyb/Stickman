@@ -1,13 +1,16 @@
 // Mirror check for pose-stick-figure-rfdetr.html.
-//   node test_mirror.mjs
+//   node research/test_mirror.mjs
 // Builds a person facing the camera with their RIGHT arm held straight out to
 // the side, pushes it through the page's own mirrorLandmarks() / readAngles() /
 // solve(), and asserts the rig's arm ends up out to the side rather than folded
 // across the chest. Also runs the old x-flip-only path to show what it did.
 
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-const html = readFileSync("pose-stick-figure-rfdetr.html", "utf8");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(HERE, "pose-stick-figure-rfdetr.html"), "utf8");
 const grab = (start, end) => {
   const i = html.indexOf(start), j = html.indexOf(end, i);
   if (i < 0 || j < 0) throw new Error("could not extract: " + start);

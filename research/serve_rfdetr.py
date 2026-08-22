@@ -1,6 +1,6 @@
 """Local RF-DETR keypoint server for pose-stick-figure-rfdetr.html.
 
-    .venv/bin/python serve_rfdetr.py [--resolution 384] [--port 8000]
+    .venv/bin/python research/serve_rfdetr.py [--resolution 384] [--port 8000]
     then open http://127.0.0.1:8000/
 
 The page posts a JPEG frame to /keypoints and gets normalized COCO-17 keypoints
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,9 +25,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from rfdetr_pose import PoseModel, add_device_args, announce_device
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT.parent))  # repo root, for rfdetr_pose
 
-ROOT = Path(__file__).parent
+from rfdetr_pose import PoseModel, add_device_args, announce_device  # noqa: E402
+
 PAGE = "pose-stick-figure-rfdetr.html"
 MAX_BODY = 8 * 1024 * 1024
 

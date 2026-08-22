@@ -1,39 +1,29 @@
-# Lunge pose demo
+# Stickman Challenge — the game
 
-Everything from one session of poking at `RFDETRKeypointPreview` (see `../README.md` for what
-that model is) using `../lunge.webm` as the source clip. Two questions got answered here: what
-the model's raw output looks like on one frame, and what it looks like across a whole clip.
-The third page is not a viewer at all: it's a small arena game where the measured lunge *is* the
-attack animation, driven by the same keypoints rather than by hand-authored keyframes.
+A small arena game where the measured lunge *is* the attack animation, driven by real captured
+keypoints rather than by hand-authored keyframes. See [`../README.md`](../README.md) for setup
+and the Windows GPU quickstart, and [`../pipeline/PIPELINE.md`](../pipeline/PIPELINE.md) for how
+`data/lunge_all_frames.json` was captured in the first place.
 
 ## Files
 
 | file | what it is | made by |
 | --- | --- | --- |
-| `lunge.webm` | source clip (moved here from the repo root) | — |
-| `lunge_frame.jpg` | one frame pulled from the clip at t=3.5s | `ffmpeg -ss 3.5 -i lunge.webm -frames:v 1 ...` |
-| `lunge_keypoints_out.jpg` | that frame annotated with skeleton + 1σ uncertainty ellipses | `../test_rfdetr_keypoints.py` |
-| `lunge_keypoints_out.json` | raw model output for that frame — `{ people: [{ score, box, keypoints }] }` | `../test_rfdetr_keypoints.py` |
-| `lunge_all_frames.json` | raw model output for **all 264 frames** of the clip | `build_sequence_viewer.py` |
-| `lunge_keypoints_viewer.html` | interactive single-frame skeleton, rebuilt from the JSON only — no photo | `build_frame_viewer.py` |
-| `lunge_keypoints_scrubber.html` | interactive all-frames skeleton, step/scrub/play through all 264 detections | `build_sequence_viewer.py` |
 | `lunge_game.html` | **playable**: stick figure that *is* the captured skeleton — move, jump, and lunge at drifting targets | `build_game.py` |
-| `build_frame_viewer.py` | reusable: image → annotated jpg + json + interactive viewer html | — |
-| `build_sequence_viewer.py` | reusable: video → raw json + interactive scrubber html | — |
 | `build_game.py` | reusable: per-frame keypoint json → clips + game html (no model inference) | — |
 | `serve_game.py` | local server: serves `lunge_game.html`, runs RF-DETR on recorded/uploaded video for the in-page recorder, reads/writes `custom_moves.json` | — |
+| `data/lunge.webm` | source clip for the captured lunge | — |
+| `data/lunge_all_frames.json` | raw model output for all 264 frames of `lunge.webm` | `../pipeline/build_sequence_viewer.py` |
 | `custom_moves.json` | recorded moves saved from the page (gitignored, written at runtime) | `serve_game.py` |
 
-The three `build_*.py` scripts are the actual source of the three HTML pages — everything in them
-(palette, layout, the "no video underneath, just the raw points and the fixed skeleton edge
-list" framing) is inlined in the `.html` files already, so the HTML files stand alone. The
-scripts exist so this is reproducible with a different image/video/threshold rather than a
-one-off.
+`build_game.py` is the source of `lunge_game.html` — everything in it (palette, layout, the rig)
+is inlined in the HTML already, so the HTML file stands alone. The script exists so this is
+reproducible with different clip windows or a different capture.
 
-`build_game.py` is the odd one out: it never touches the model. It reads
-`lunge_all_frames.json` and cuts three clips out of the track — `idle` (source frames 79–106,
-the ready stance held before the lunge, ping-ponged), `lunge` (frames 106–134, a short hold at
-the deepest pose, then 154–188, with a strike window over the deep extension), and `walk`.
+`build_game.py` never touches the model. It reads `data/lunge_all_frames.json` and cuts three
+clips out of the track — `idle` (source frames 79–106, the ready stance held before the lunge,
+ping-ponged), `lunge` (frames 106–134, a short hold at the deepest pose, then 154–188, with a
+strike window over the deep extension), and `walk`.
 
 The character **is the measured skeleton**. A clip frame is the **15 joint positions** the
 detector reported, hip-centred and multiplied by one scale factor (`0.4466`, sized so the
@@ -51,57 +41,35 @@ the body drops as far as the body drops. Two things that need saying:
 - Frames 161–162 carry a **duplicate detection** whose higher-scoring copy has left and right
   swapped. The builder follows one subject across frames — each frame keeps the candidate
   closest to the frame before it, and flips back a detection whose mirror image is closer —
-  instead of taking `max(score)` per frame, which used to snap the limbs mid-recovery.
+  instead of taking `max(score)` per frame, which used to snap the limbs mid-recovery. See
+  [`../pipeline/PIPELINE.md`](../pipeline/PIPELINE.md) for the full write-up.
 
 ## Opening this again later
 
-**All three HTML files are fully self-contained** — the keypoint data is inlined as JSON in a
-`<script>` tag, there's no separate server or image to load. Just double-click any of the
-`.html` files (or drag one into a browser tab / `open lunge_game.html`). The only external
-call is a Google Fonts stylesheet; without internet it falls back to the system sans-serif and
-still works fine.
-
-**They're also published as Claude Artifacts**, private to this account:
-- Single frame: https://claude.ai/code/artifact/4ac7ff38-8545-4378-8354-ffae7ed5dddf
-- All frames (scrubber): https://claude.ai/code/artifact/e652cbfe-7d60-4157-85d5-59e6daca349a
-
-Those links work from any browser, any machine, whether or not this repo or terminal session is
-still around — Anthropic hosts them, not this machine. Find them again anytime via
-[claude.ai/code/artifacts](https://claude.ai/code/artifacts) if you lose the links.
+**`lunge_game.html` is fully self-contained** — the keypoint data is inlined as JSON in a
+`<script>` tag, there's no separate server or image to load. Just double-click the file (or
+drag it into a browser tab / `open game/lunge_game.html`). The only external call is a Google
+Fonts stylesheet; without internet it falls back to the system sans-serif and still works fine.
 
 ## Regenerating
 
-From the repo root, using the project's existing `.venv` (see `../README.md` for setup):
+From the repo root, using the project's existing `.venv` (see [`../README.md`](../README.md)
+for setup):
 
 ```bash
-.venv/bin/python lunge_pose_demo/build_frame_viewer.py lunge_pose_demo/lunge_frame.jpg
-.venv/bin/python lunge_pose_demo/build_sequence_viewer.py lunge_pose_demo/lunge.webm
-.venv/bin/python lunge_pose_demo/build_game.py
+.venv/bin/python game/build_game.py
 ```
 
-On Windows use `.venv\Scripts\python` in place of `.venv/bin/python` (and `python` for
-`python3`); see `../README.md` for the CUDA install and the `--device` / `--half` flags, which
-the first two accept (`build_game.py` never touches the model).
-
-`build_frame_viewer.py` takes a few seconds. `build_sequence_viewer.py` re-runs inference on
-every frame — at the default 384px on CPU that's roughly 3.5 minutes for this clip (~0.8s/frame);
-on a GPU with FP16 it is seconds. `--label` keeps a GPU re-run from clobbering the committed
-CPU output, so the two can be compared:
-
-```bash
-.venv/bin/python lunge_pose_demo/build_sequence_viewer.py lunge_pose_demo/lunge.webm --label lunge_gpu
-```
-
-If OpenCV opens the `.webm` but reports zero frames (its bundled FFmpeg has to decode VP9),
-transcode to mp4 first, or decode with the `av` package that is already in the venv.
-Both viewers also accept `--threshold` and `--resolution`.
+On Windows use `.venv\Scripts\python` in place of `.venv/bin/python`; see
+[`../README.md`](../README.md) for the CUDA install and the `--device` / `--half` flags (not
+needed here — `build_game.py` never touches the model).
 
 `build_game.py` runs in well under a second and needs nothing from the venv — plain `python3`
 works, since it only reads the JSON the sequence builder already wrote. Its clip windows are
 flags, so they can be retuned without editing code:
 
 ```bash
-python3 lunge_pose_demo/build_game.py --idle 79:106 --lunge 106:134,154:188 --speed 1.4
+python3 game/build_game.py --idle 79:106 --lunge 106:134,154:188 --speed 1.4
 ```
 
 `--hold` sets how many frames the deepest pose is held for, `--smooth` the moving-average window
@@ -127,8 +95,8 @@ Opening `lunge_game.html` directly (`file://`) still plays `F` and any move alre
 cached in the browser, but recording a new one needs a local model to analyze it against:
 
 ```bash
-.venv/bin/python lunge_pose_demo/serve_game.py --resolution 384
-# Windows:  .venv\Scripts\python lunge_pose_demo\serve_game.py --resolution 384
+.venv/bin/python game/serve_game.py --resolution 384
+# Windows:  .venv\Scripts\python game\serve_game.py --resolution 384
 ```
 
 The startup banner and `http://127.0.0.1:8000/health` both report which device and precision
@@ -157,5 +125,5 @@ offline fallback; either way `C` works immediately, no reload. To ship a move wi
 all, bake it into the HTML:
 
 ```bash
-python3 lunge_pose_demo/build_game.py --custom lunge_pose_demo/custom_moves.json
+python3 game/build_game.py --custom game/custom_moves.json
 ```

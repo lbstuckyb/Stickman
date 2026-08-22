@@ -1,25 +1,74 @@
 # From video to playable lunge: how the capture became the attack animation
 
+Everything here comes from one session of running `RFDETRKeypointPreview` (see
+[`../research/README.md`](../research/README.md) for what that model is) against
+`../game/data/lunge.webm` — the source clip for the [Stickman Challenge](../README.md) game.
 Full pipeline, start to finish, in the order Claude actually built it across two sessions
 (initial commit `7b27b78`, then a rework in `eb508f8`).
 
+| file | what it is | made by |
+| --- | --- | --- |
+| `build_frame_viewer.py` | reusable: image → annotated jpg + json + interactive viewer html | — |
+| `build_sequence_viewer.py` | reusable: video → raw json + interactive scrubber html | — |
+| `lunge_frame.jpg` | one frame pulled from the clip at t=3.5s | `ffmpeg -ss 3.5 -i ../game/data/lunge.webm -frames:v 1 ...` |
+| `lunge_keypoints_out.jpg` / `.json` | that frame annotated, and the raw model output for it | `build_frame_viewer.py` |
+| `lunge_keypoints_viewer.html` | interactive single-frame skeleton, rebuilt from the JSON only — no photo | `build_frame_viewer.py` |
+| `lunge_keypoints_scrubber.html` | interactive all-frames skeleton, step/scrub/play through all 264 detections | `build_sequence_viewer.py` |
+
+`../game/build_game.py` is the actual consumer of this pipeline's output
+(`../game/data/lunge_all_frames.json`) — see [`../game/README.md`](../game/README.md) for that
+side. Regenerate from the repo root:
+
+```bash
+.venv/bin/python pipeline/build_frame_viewer.py pipeline/lunge_frame.jpg
+.venv/bin/python pipeline/build_sequence_viewer.py game/data/lunge.webm
+```
+
+`build_frame_viewer.py` takes a few seconds. `build_sequence_viewer.py` re-runs inference on
+every frame — at the default 384px on CPU that's roughly 3.5 minutes for this clip (~0.8s/frame);
+on a GPU with FP16 it is seconds. `--label` keeps a GPU re-run from clobbering the committed
+CPU output, so the two can be compared:
+
+```bash
+.venv/bin/python pipeline/build_sequence_viewer.py game/data/lunge.webm --label lunge_gpu
+```
+
+If OpenCV opens the `.webm` but reports zero frames (its bundled FFmpeg has to decode VP9),
+transcode to mp4 first, or decode with the `av` package that is already in the venv.
+Both viewers also accept `--threshold` and `--resolution`.
+
+**Both HTML viewers are fully self-contained** — the keypoint data is inlined as JSON in a
+`<script>` tag, there's no separate server or image to load. Just double-click either `.html`
+file, or drag one into a browser tab. The only external call is a Google Fonts stylesheet;
+without internet it falls back to the system sans-serif and still works fine.
+
+**They're also published as Claude Artifacts**, private to this account:
+- Single frame: https://claude.ai/code/artifact/4ac7ff38-8545-4378-8354-ffae7ed5dddf
+- All frames (scrubber): https://claude.ai/code/artifact/e652cbfe-7d60-4157-85d5-59e6daca349a
+
+Those links work from any browser, any machine, whether or not this repo or terminal session is
+still around — Anthropic hosts them, not this machine. Find them again anytime via
+[claude.ai/code/artifacts](https://claude.ai/code/artifacts) if you lose the links.
+
 ## Step 1 — Get one frame's worth of keypoints out of the model
 
-`test_rfdetr_keypoints.py` is a smoke test: it loads a single frame (`lunge_frame.jpg`, pulled
-from the video at t=3.5s with `ffmpeg`), runs it through `RFDETRKeypointPreview` (a model that
-returns COCO-17 keypoints — nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles —
-each with an x/y position **and** a 2-D uncertainty ellipse, not just a single point), and
-writes `lunge_keypoints_out.json` in the shape `{ people: [{ score, box, keypoints: [{x, y, v}, ...] }] }`,
-with `x`/`y` normalized 0–1 and `v` a visibility/confidence score. This step never touches the
-game — it's just "does the model work, what does its output look like."
+`research/test_rfdetr_keypoints.py` is a smoke test: it loads a single frame
+(`pipeline/lunge_frame.jpg`, pulled from the video at t=3.5s with `ffmpeg`), runs it through
+`RFDETRKeypointPreview` (a model that returns COCO-17 keypoints — nose, eyes, ears, shoulders,
+elbows, wrists, hips, knees, ankles — each with an x/y position **and** a 2-D uncertainty
+ellipse, not just a single point), and writes `lunge_keypoints_out.json` in the shape
+`{ people: [{ score, box, keypoints: [{x, y, v}, ...] }] }`, with `x`/`y` normalized 0–1 and `v`
+a visibility/confidence score. This step never touches the game — it's just "does the model
+work, what does its output look like."
 
 ## Step 2 — Run the model over every frame of the video
 
-`build_sequence_viewer.py lunge.webm` opens the clip with OpenCV, decodes it frame by frame,
-runs the same model on **all 264 frames**, and writes `lunge_all_frames.json`: one entry per
-frame (`{i, t, people: [...]}`), same per-person keypoint shape as step 1. This is the slow step
-— roughly 0.7–1s/frame on CPU — and it's the only step that runs the neural network. Every later
-step is pure math over this one file; the model is never invoked again.
+`pipeline/build_sequence_viewer.py game/data/lunge.webm` opens the clip with OpenCV, decodes it
+frame by frame, runs the same model on **all 264 frames**, and writes
+`game/data/lunge_all_frames.json`: one entry per frame (`{i, t, people: [...]}`), same
+per-person keypoint shape as step 1. This is the slow step — roughly 0.7–1s/frame on CPU — and
+it's the only step that runs the neural network. Every later step is pure math over this one
+file; the model is never invoked again.
 
 ## Step 3 — Follow one person across frames, not just "best score per frame" (`build_game.py:96` `track_subject`)
 
@@ -83,11 +132,11 @@ Storing raw measured points + a separate root offset keeps both of those honest.
 
 ## Step 9 — Bake everything into one self-contained HTML file (`build_game.py:634` `build_html`, and `main()`)
 
-`build_game.py` assembles a Python dict — `points` (the 15 names), `clips` (idle/lunge/walk,
+`game/build_game.py` assembles a Python dict — `points` (the 15 names), `clips` (idle/lunge/walk,
 each with its frame array, fps, loop mode, and for lunge, `root` and the `active` strike-window
 frame range), `rig` (stroke widths etc.), `tuck` (the one-off jump pose) — dumps it to JSON, and
 substitutes it into a `<script>const DATA = __DATA_JSON__;</script>` tag inside a single HTML
-template. The result, `lunge_game.html`, has no server dependency and no separate data file:
+template. The result, `game/lunge_game.html`, has no server dependency and no separate data file:
 opening it in any browser (even `file://`) loads the whole captured motion inline.
 
 ## Step 10 — What happens in the browser when you press F (`lunge_game.html`, inlined from `build_game.py:1402` and the runtime code around lines 900–1180)

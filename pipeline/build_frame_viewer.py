@@ -7,8 +7,8 @@
                                      no photo underneath)
 
 Usage:
-    ../.venv/bin/python build_frame_viewer.py lunge_frame.jpg
-    ../.venv/bin/python build_frame_viewer.py lunge_frame.jpg --label lunge --threshold 0.5
+    .venv/bin/python pipeline/build_frame_viewer.py pipeline/lunge_frame.jpg
+    .venv/bin/python pipeline/build_frame_viewer.py pipeline/lunge_frame.jpg --label lunge --threshold 0.5
 """
 from __future__ import annotations
 
@@ -23,8 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # repo root, for rfdetr_pose
 
 from rfdetr_pose import (KEYPOINT_NAMES, SKELETON, PoseModel,  # noqa: E402
-                         add_device_args, announce_device)
-from test_rfdetr_keypoints import annotate  # noqa: E402
+                         add_device_args, announce_device, annotate)
 
 
 def build_html(data_json: str) -> str:

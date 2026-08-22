@@ -9,8 +9,8 @@ This decodes and runs inference on every frame, so it's slow: at 384px on CPU,
 budget roughly 0.7-1s/frame (see the README table for other resolutions).
 
 Usage:
-    ../.venv/bin/python build_sequence_viewer.py lunge.webm
-    ../.venv/bin/python build_sequence_viewer.py lunge.webm --resolution 384 --threshold 0.5
+    .venv/bin/python pipeline/build_sequence_viewer.py game/data/lunge.webm
+    .venv/bin/python pipeline/build_sequence_viewer.py game/data/lunge.webm --resolution 384 --threshold 0.5
 """
 from __future__ import annotations
 

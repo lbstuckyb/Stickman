@@ -1,12 +1,16 @@
 // Retarget check for pose-stick-figure-rfdetr.html.
-//   node test_retarget.mjs [payload.json]
+//   node research/test_retarget.mjs [payload.json]
 // Extracts the joint map, readAngles() and solve() straight out of the page and runs
 // them over a real /keypoints payload, so the COCO-17 wiring is tested, not restated.
 // Get a payload with:
 //   curl -X POST --data-binary @frame.jpg -H "Content-Type: image/jpeg" \
 //        http://127.0.0.1:8000/keypoints > payload.json
 import {readFileSync} from "fs";
-const html = readFileSync("pose-stick-figure-rfdetr.html","utf8");
+import {fileURLToPath} from "url";
+import {dirname, join} from "path";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(HERE, "pose-stick-figure-rfdetr.html"), "utf8");
 // pull the real source out of the page: joint map, helpers, readAngles, solve, RIG
 const grab = (start, end) => {
   const i = html.indexOf(start), j = html.indexOf(end, i);
@@ -20,7 +24,7 @@ const src = grab("const L = {", "/* --------------------------------------------
           + grab("function solve(p, ox, oy, s)", "/* ------------------------------------------------------------\n   4.".slice(0,20));
 const mod = new Function(src + "\nreturn {L, readAngles, solve, RIG, ok, mid};")();
 
-const {people} = JSON.parse(readFileSync(process.argv[2] || "payload.json","utf8"));
+const {people} = JSON.parse(readFileSync(process.argv[2] || join(HERE, "payload.json"),"utf8"));
 const deg = r => (r*180/Math.PI).toFixed(0);
 let bad = [];
 people.forEach((p, idx) => {

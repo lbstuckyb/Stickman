@@ -1,6 +1,6 @@
 """Smoke test + benchmark for RF-DETR Keypoint Preview.
 
-    .venv/bin/python test_rfdetr_keypoints.py [image.jpg] [--runs 5] [--resolution 576]
+    .venv/bin/python research/test_rfdetr_keypoints.py [image.jpg] [--runs 5] [--resolution 576]
 
 Checks the model loads, returns well-formed COCO-17 keypoints, and writes an
 annotated image showing each joint's predicted uncertainty ellipse (the thing
@@ -19,52 +19,21 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from rfdetr_pose import (KEYPOINT_NAMES, SKELETON, PoseModel, add_device_args,
-                         announce_device, covariance_ellipse)
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))  # repo root, for rfdetr_pose
 
-TEAL = (197, 209, 79)      # BGR
-AMBER = (68, 181, 242)
-DIM = (150, 130, 108)
-
-
-def annotate(image: np.ndarray, kp) -> np.ndarray:
-    out = image.copy()
-    for i in range(len(kp)):
-        xy = kp.xy[i].astype(int)
-        conf = kp.keypoint_confidence[i]
-        vis = kp.visible[i] if kp.visible is not None else np.ones(len(xy), bool)
-        cov = kp.data["covariance"][i]
-
-        x1, y1, x2, y2 = kp.data["xyxy"][i].astype(int)
-        cv2.rectangle(out, (x1, y1), (x2, y2), DIM, 1)
-        cv2.putText(out, f"{kp.detection_confidence[i]:.2f}", (x1, max(14, y1 - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, DIM, 1, cv2.LINE_AA)
-
-        for a, b in SKELETON:
-            if conf[a] < 0.3 or conf[b] < 0.3:
-                continue
-            cv2.line(out, tuple(xy[a]), tuple(xy[b]), TEAL, 2, cv2.LINE_AA)
-
-        for j, (x, y) in enumerate(xy):
-            if conf[j] < 0.3:
-                continue
-            # 1-sigma ellipse: thick where the model calls the joint visible,
-            # thin where it thinks the joint is occluded but still findable.
-            ax_a, ax_b, angle = covariance_ellipse(cov[j], n_sigma=1.0)
-            cv2.ellipse(out, (int(x), int(y)), (max(1, int(ax_a)), max(1, int(ax_b))),
-                        angle, 0, 360, AMBER, 2 if vis[j] else 1, cv2.LINE_AA)
-            cv2.circle(out, (int(x), int(y)), 3, AMBER, -1, cv2.LINE_AA)
-    return out
+from rfdetr_pose import (KEYPOINT_NAMES, PoseModel, add_device_args,  # noqa: E402
+                         announce_device, annotate)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("image", nargs="?", default="sample_people.jpg")
+    ap.add_argument("image", nargs="?", default=str(HERE / "sample_people.jpg"))
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--resolution", type=int, default=None,
                     help="inference resolution; the preview checkpoint's default is 576")
-    ap.add_argument("--out", default="rfdetr_keypoints_out.jpg")
+    ap.add_argument("--out", default=str(HERE / "rfdetr_keypoints_out.jpg"))
     add_device_args(ap)
     args = ap.parse_args()
     out_json = Path(args.out).with_suffix(".json")   # so fp16/fp32 runs do not overwrite
