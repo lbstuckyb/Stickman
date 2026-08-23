@@ -82,12 +82,43 @@ on the way out.
 
 ### Playing it
 
-`←`/`→` (or `A`/`D`) move, `Space` jumps, `F` performs the captured lunge, `C` performs your own
-recorded move (once you've recorded one — see below), `P` pauses and `R` restarts. The hitbox is
-read off the measured pose — circles at the lead ankle and lead wrist, live only during the
-move's strike window — and it sweeps forward with the step-out, putting the lead hand about
-350 px ahead of where you pressed. Scoring means being in range *and* timing the press.
-Hits build a combo; letting a target drift off the far edge resets it. Rounds last 60 seconds.
+The arena fills the whole window. You land on a title screen; **Play** runs a 3-2-1 countdown and
+starts the round, and a round ends on the results screen (score, hits, missed, accuracy, best).
+Score, combo, timer and best all live in the canvas HUD rather than in page chrome.
+
+| key | does |
+| --- | --- |
+| `←`/`→` (or `A`/`D`) | move |
+| `Space` | jump |
+| `F` | the captured lunge |
+| `C` | your own recorded move (once you've recorded one — see below) |
+| `Esc` | menu — pauses a round, and backs out of the settings panel or the recorder |
+| `P` | pause / resume |
+| `R` | restart the round (while paused or on the results screen) |
+
+On the menus the arrow keys move between buttons and `Enter`/`Space` activates one.
+
+The hitbox is read off the measured pose — circles at the lead ankle and lead wrist, live only
+during the move's strike window — and it sweeps forward with the step-out, putting the lead hand
+about 350 px ahead of where you pressed. Scoring means being in range *and* timing the press.
+Hits build a combo; letting a target drift off the far edge resets it. Rounds are 60 seconds by
+default and can be set to 90 or 120.
+
+### Settings
+
+**Settings** on the title or pause screen (or `Esc` → Settings) opens a four-tab panel:
+
+- **Game** — round length (60/90/120s), target rate (calm/normal/frantic), and toggles for
+  hitboxes, floor reflections, the parallax backdrop and screen shake. All of it persists in
+  `localStorage`, so it survives a reload.
+- **Moves** — the recorder lives here now: **Record / upload a move**, plus the list of saved
+  moves with a delete on each. Recording needs `serve_game.py` running; playing a saved move
+  does not.
+- **Move analytics** — the live read-out of what is driving the figure this instant (state, clip
+  frame, facing, root travel, whether the strike window is open), the clip inventory, and the
+  write-ups of what a frame actually is and how scoring reads the pose. This used to sit
+  alongside the arena; it moved into the panel when the arena went full-viewport.
+- **Controls** — the key list above.
 
 ### Recording your own move
 

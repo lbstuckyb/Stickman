@@ -140,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_clip()
         if path == "/moves":
             return self._handle_save_move()
+        if path == "/moves/current":
+            return self._handle_select_move()
         return self._json(404, {"error": "not found"})
 
     def _handle_keypoints(self):
@@ -208,6 +210,26 @@ class Handler(BaseHTTPRequestHandler):
         with moves_lock:
             store = _load_moves()
             store["moves"][name] = {"clip": clip}
+            store["current"] = name
+            _save_moves(store)
+        return self._json(200, {"ok": True, "current": name})
+
+    def _handle_select_move(self):
+        """Rebind C to a move that is already saved, without re-uploading its clip."""
+        try:
+            raw = _read_body(self)
+        except ValueError as e:
+            return self._json(413, {"error": str(e)})
+        try:
+            body = json.loads(raw)
+            name = str(body["name"]).strip()
+        except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
+            return self._json(400, {"error": f"bad request: {e}"})
+
+        with moves_lock:
+            store = _load_moves()
+            if name not in store["moves"]:
+                return self._json(404, {"error": f"no move named {name!r}"})
             store["current"] = name
             _save_moves(store)
         return self._json(200, {"ok": True, "current": name})

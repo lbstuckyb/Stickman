@@ -11,6 +11,11 @@ retargeting, and the rig.
 # then open http://127.0.0.1:8000/
 ```
 
+`←`/`→` move, `Space` jumps, `F` is the captured lunge, `C` is a move you recorded yourself, and
+`Esc` opens the menu. Settings (round length, target rate, visual toggles), the move recorder and
+the live move analytics all live in the settings panel — see
+[`game/README.md`](game/README.md#playing-it).
+
 ## Layout
 
 | dir | what's in it |
